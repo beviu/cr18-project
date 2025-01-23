@@ -1,11 +1,13 @@
 #include <cassert>
 #include <chrono>
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <expected>
 #include <optional>
 #include <print>
+#include <span>
 #include <string_view>
 
 #include <liburing.h>
@@ -67,7 +69,12 @@ struct owned_fd {
   }
 };
 
-bool run(bool fixed_files, std::string_view name) {
+static void fill_buffer(std::span<char> buffer) {
+  for (char &c : buffer)
+    c = 'A' + (rand() % 26);
+}
+
+static bool run(bool fixed_files, std::string_view name) {
   auto queue = owned_io_uring::initialize(8, 0);
   if (!queue) {
     std::println(stderr, "io_uring_queue_init: {}", strerror(queue.error()));
@@ -107,16 +114,23 @@ bool run(bool fixed_files, std::string_view name) {
       if (!sqe)
         break;
 
+      constexpr const size_t data_length = 16;
+
+      auto data = new char[data_length];
+      fill_buffer({data, data_length});
+
       if (fixed_files) {
-        io_uring_prep_sendto(sqe, 0, nullptr, 0, 0,
+        io_uring_prep_sendto(sqe, 0, data, data_length, 0,
                              reinterpret_cast<const sockaddr *>(&addr),
                              sizeof(addr));
         sqe->flags |= IOSQE_FIXED_FILE;
       } else {
-        io_uring_prep_sendto(sqe, socket->fd, nullptr, 0, 0,
+        io_uring_prep_sendto(sqe, socket->fd, data, data_length, 0,
                              reinterpret_cast<const sockaddr *>(&addr),
                              sizeof(addr));
       }
+
+      sqe->user_data = reinterpret_cast<uint64_t>(data);
     }
 
     int ret = io_uring_submit(&queue->ring);
@@ -130,6 +144,9 @@ bool run(bool fixed_files, std::string_view name) {
     unsigned int head;
     io_uring_cqe *cqe;
     io_uring_for_each_cqe(&queue->ring, head, cqe) {
+      auto data = reinterpret_cast<char *>(cqe->user_data);
+      delete[] data;
+
       if (cqe->res < 0) {
         std::println(stderr, "sendto: {}", strerror(-cqe->res));
         return false;
