@@ -6,6 +6,7 @@
 #include <expected>
 #include <optional>
 #include <print>
+#include <string_view>
 
 #include <liburing.h>
 #include <netinet/in.h>
@@ -66,17 +67,25 @@ struct owned_fd {
   }
 };
 
-int main() {
+bool run(bool fixed_files, std::string_view name) {
   auto queue = owned_io_uring::initialize(8, 0);
   if (!queue) {
     std::println(stderr, "io_uring_queue_init: {}", strerror(queue.error()));
-    return EXIT_FAILURE;
+    return false;
   }
 
   const auto socket = owned_fd::create_socket(AF_INET, SOCK_DGRAM, 0);
   if (!socket) {
     perror("socket");
-    return EXIT_FAILURE;
+    return false;
+  }
+
+  if (fixed_files) {
+    int ret = io_uring_register_files(&queue->ring, &socket->fd, 1);
+    if (ret != 0) {
+      std::println(stderr, "io_uring_register_files: {}", strerror(ret));
+      return false;
+    }
   }
 
   sockaddr_in addr = {};
@@ -98,15 +107,22 @@ int main() {
       if (!sqe)
         break;
 
-      io_uring_prep_sendto(sqe, socket->fd, nullptr, 0, 0,
-                           reinterpret_cast<const sockaddr *>(&addr),
-                           sizeof(addr));
+      if (fixed_files) {
+        io_uring_prep_sendto(sqe, 0, nullptr, 0, 0,
+                             reinterpret_cast<const sockaddr *>(&addr),
+                             sizeof(addr));
+        sqe->flags |= IOSQE_FIXED_FILE;
+      } else {
+        io_uring_prep_sendto(sqe, socket->fd, nullptr, 0, 0,
+                             reinterpret_cast<const sockaddr *>(&addr),
+                             sizeof(addr));
+      }
     }
 
     int ret = io_uring_submit(&queue->ring);
     if (ret < 0) {
       std::println(stderr, "io_uring_submit: {}", strerror(-ret));
-      return EXIT_FAILURE;
+      return false;
     }
 
     unsigned int i = 0;
@@ -126,7 +142,17 @@ int main() {
     io_uring_cq_advance(&queue->ring, i);
   }
 
-  std::println(stdout, "Sent {} datagrams in 1 seconds.", datagram_count);
+  std::println(stdout, "{}: {}", name, datagram_count);
+
+  return true;
+}
+
+int main() {
+  if (!run(false, "basic"))
+    return EXIT_FAILURE;
+
+  if (!run(true, "fixed files"))
+    return EXIT_FAILURE;
 
   return EXIT_SUCCESS;
 }
