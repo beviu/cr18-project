@@ -52,3 +52,6 @@ benchmarked.
 ** Conclusion
 
 * Plan for myself
+
+** Write the basic benchmark code for transmission with io_uring.
+** Write the basic benchmark code for reception with io_uring.
