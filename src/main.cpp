@@ -1,15 +1,15 @@
-#include <assert.h>
+#include <cassert>
 #include <chrono>
-#include <liburing.h>
-#include <netinet/in.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/socket.h>
-
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <expected>
 #include <optional>
 #include <print>
+
+#include <liburing.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
 struct owned_io_uring {
   io_uring ring = {
@@ -90,7 +90,7 @@ int main() {
 
   for (;;) {
     const auto now = std::chrono::steady_clock::now();
-    if (now - start > std::chrono::seconds(5))
+    if (now - start > std::chrono::seconds(1))
       break;
 
     for (;;) {
@@ -121,7 +121,7 @@ int main() {
     io_uring_cq_advance(&queue->ring, i);
   }
 
-  std::println(stdout, "Sent {} datagrams in 5 seconds.", datagram_count);
+  std::println(stdout, "Sent {} datagrams in 1 seconds.", datagram_count);
 
   return EXIT_SUCCESS;
 }
