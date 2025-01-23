@@ -114,6 +114,11 @@ int main() {
     unsigned int head;
     io_uring_cqe *cqe;
     io_uring_for_each_cqe(&queue->ring, head, cqe) {
+      if (cqe->res < 0) {
+        std::println(stderr, "sendto: {}", strerror(-cqe->res));
+        return false;
+      }
+
       datagram_count++;
       i++;
     }
