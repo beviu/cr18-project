@@ -1,10 +1,11 @@
 #include <cassert>
 #include <chrono>
-#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <expected>
+#include <list>
+#include <memory>
 #include <optional>
 #include <print>
 #include <span>
@@ -69,16 +70,75 @@ struct owned_fd {
   }
 };
 
+class buffer_allocator {
+public:
+  virtual ~buffer_allocator() = default;
+
+  virtual std::unique_ptr<char[]> get_buffer() = 0;
+  virtual void release_buffer(std::unique_ptr<char[]>) = 0;
+};
+
+class naive_buffer_allocator : public buffer_allocator {
+public:
+  naive_buffer_allocator(size_t buffer_size) : buffer_size(buffer_size) {}
+
+  std::unique_ptr<char[]> get_buffer() override {
+    char *buffer = new (std::nothrow) char[buffer_size];
+    return std::unique_ptr<char[]>(buffer);
+  }
+
+  void release_buffer(std::unique_ptr<char[]> buffer) override {}
+
+private:
+  size_t buffer_size;
+};
+
+class buffer_pool : public buffer_allocator {
+public:
+  buffer_pool(size_t buffer_size, size_t buffer_count) {
+    for (size_t i = 0; i < buffer_count; ++i)
+      free_buffers.emplace_back(new char[buffer_size]);
+  }
+
+  std::unique_ptr<char[]> get_buffer() override {
+    if (free_buffers.empty())
+      return nullptr;
+
+    auto buffer = std::move(free_buffers.front());
+    free_buffers.pop_front();
+
+    return buffer;
+  }
+
+  void release_buffer(std::unique_ptr<char[]> buffer) override {
+    free_buffers.emplace_back(std::move(buffer));
+  }
+
+private:
+  std::list<std::unique_ptr<char[]>> free_buffers;
+};
+
 static void fill_buffer(std::span<char> buffer) {
   for (char &c : buffer)
     c = 'A' + (rand() % 26);
 }
 
-static bool run(bool fixed_files, std::string_view name) {
+static bool run(bool fixed_files, bool use_buffer_pool, std::string_view name) {
   auto queue = owned_io_uring::initialize(8, 0);
   if (!queue) {
     std::println(stderr, "io_uring_queue_init: {}", strerror(queue.error()));
     return false;
+  }
+
+  constexpr const size_t buffer_size = 16;
+
+  std::unique_ptr<buffer_allocator> buffers;
+
+  if (use_buffer_pool) {
+    buffers =
+        std::make_unique<buffer_pool>(buffer_size, queue->ring.sq.ring_sz);
+  } else {
+    buffers = std::make_unique<naive_buffer_allocator>(buffer_size);
   }
 
   const auto socket = owned_fd::create_socket(AF_INET, SOCK_DGRAM, 0);
@@ -114,23 +174,21 @@ static bool run(bool fixed_files, std::string_view name) {
       if (!sqe)
         break;
 
-      constexpr const size_t data_length = 16;
-
-      auto data = new char[data_length];
-      fill_buffer({data, data_length});
+      auto buffer = buffers->get_buffer();
+      fill_buffer({buffer.get(), buffer_size});
 
       if (fixed_files) {
-        io_uring_prep_sendto(sqe, 0, data, data_length, 0,
+        io_uring_prep_sendto(sqe, 0, buffer.get(), buffer_size, 0,
                              reinterpret_cast<const sockaddr *>(&addr),
                              sizeof(addr));
         sqe->flags |= IOSQE_FIXED_FILE;
       } else {
-        io_uring_prep_sendto(sqe, socket->fd, data, data_length, 0,
+        io_uring_prep_sendto(sqe, socket->fd, buffer.get(), buffer_size, 0,
                              reinterpret_cast<const sockaddr *>(&addr),
                              sizeof(addr));
       }
 
-      sqe->user_data = reinterpret_cast<uint64_t>(data);
+      sqe->user_data = reinterpret_cast<uint64_t>(buffer.release());
     }
 
     int ret = io_uring_submit(&queue->ring);
@@ -144,8 +202,8 @@ static bool run(bool fixed_files, std::string_view name) {
     unsigned int head;
     io_uring_cqe *cqe;
     io_uring_for_each_cqe(&queue->ring, head, cqe) {
-      auto data = reinterpret_cast<char *>(cqe->user_data);
-      delete[] data;
+      std::unique_ptr<char[]> buffer(reinterpret_cast<char *>(cqe->user_data));
+      buffers->release_buffer(std::move(buffer));
 
       if (cqe->res < 0) {
         std::println(stderr, "sendto: {}", strerror(-cqe->res));
@@ -165,10 +223,13 @@ static bool run(bool fixed_files, std::string_view name) {
 }
 
 int main() {
-  if (!run(false, "basic"))
+  if (!run(false, false, "basic"))
     return EXIT_FAILURE;
 
-  if (!run(true, "fixed files"))
+  if (!run(false, true, "buffer pool"))
+    return EXIT_FAILURE;
+
+  if (!run(true, true, "fixed files"))
     return EXIT_FAILURE;
 
   return EXIT_SUCCESS;
