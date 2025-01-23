@@ -79,6 +79,11 @@ int main() {
     return EXIT_FAILURE;
   }
 
+  sockaddr_in addr = {};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = htons(12000);
+
   const auto start = std::chrono::steady_clock::now();
 
   unsigned long datagram_count = 0;
@@ -88,37 +93,32 @@ int main() {
     if (now - start > std::chrono::seconds(5))
       break;
 
-    io_uring_sqe *sqe = io_uring_get_sqe(&queue->ring);
-    assert(sqe);
+    for (;;) {
+      io_uring_sqe *sqe = io_uring_get_sqe(&queue->ring);
+      if (!sqe)
+        break;
 
-    sockaddr_in addr = {};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    addr.sin_port = htons(12000);
-
-    io_uring_prep_sendto(sqe, socket->fd, nullptr, 0, 0,
-                         reinterpret_cast<const sockaddr *>(&addr),
-                         sizeof(addr));
+      io_uring_prep_sendto(sqe, socket->fd, nullptr, 0, 0,
+                           reinterpret_cast<const sockaddr *>(&addr),
+                           sizeof(addr));
+    }
 
     int ret = io_uring_submit(&queue->ring);
     if (ret < 0) {
       std::println(stderr, "io_uring_submit: {}", strerror(-ret));
       return EXIT_FAILURE;
-    } else if (ret != 1) {
-      std::println(stderr, "io_uring_submit: expected 1, got {}", ret);
-      return EXIT_FAILURE;
     }
 
+    unsigned int i = 0;
+
+    unsigned int head;
     io_uring_cqe *cqe;
-    ret = io_uring_wait_cqe(&queue->ring, &cqe);
-    if (ret < 0) {
-      std::println(stderr, "io_uring_wait_cqe: {}", strerror(-ret));
-      return EXIT_FAILURE;
+    io_uring_for_each_cqe(&queue->ring, head, cqe) {
+      datagram_count++;
+      i++;
     }
 
-    datagram_count++;
-
-    io_uring_cqe_seen(&queue->ring, cqe);
+    io_uring_cq_advance(&queue->ring, i);
   }
 
   std::println(stdout, "Sent {} datagrams in 5 seconds.", datagram_count);
