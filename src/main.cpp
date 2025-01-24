@@ -4,8 +4,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <expected>
-#include <list>
-#include <memory>
 #include <optional>
 #include <print>
 #include <span>
@@ -70,48 +68,83 @@ struct owned_fd {
   }
 };
 
-template <size_t BufferSize> class naive_buffer_allocator {
+class naive_buffer_allocator {
 public:
-  typedef std::array<unsigned char, BufferSize> buffer;
+  naive_buffer_allocator(size_t buffer_size) : buffer_size(buffer_size) {}
 
-  buffer *get_buffer() const { return new (std::nothrow) buffer; }
-
-  void release_buffer(buffer *buf) const { delete buf; }
-};
-
-template <size_t BufferSize> class buffer_pool {
-public:
-  typedef std::array<unsigned char, BufferSize> buffer;
-
-  static std::optional<buffer_pool<BufferSize>>
-  create_with_buffer_count(size_t buf_count) {
-    buffer_pool<BufferSize> pool;
-
-    for (size_t i = 0; i < buf_count; ++i) {
-      const auto buf = new (std::nothrow) buffer;
-      if (!buf)
-        return std::nullopt;
-
-      pool.free_buffers.emplace_front(buf);
-    }
-
-    return pool;
+  std::span<unsigned char> get_buffer() const {
+    const auto buf = new (std::nothrow) unsigned char[buffer_size];
+    return {buf, buffer_size};
   }
 
-  buffer *get_buffer() {
-    if (free_buffers.empty())
-      return nullptr;
-
-    auto buf = std::move(free_buffers.front());
-    free_buffers.pop_front();
-
-    return buf.release();
-  }
-
-  void release_buffer(buffer *buf) { free_buffers.emplace_back(buf); }
+  void release_buffer(unsigned char *buf) const { delete[] buf; }
 
 private:
-  std::list<std::unique_ptr<buffer>> free_buffers;
+  size_t buffer_size;
+};
+
+template <size_t Capacity> class buffer_pool {
+public:
+  buffer_pool(size_t buffer_size) : buffer_size(buffer_size) {}
+
+  buffer_pool(buffer_pool &&other)
+      : buffer_size(other.buffer_size), ring(other.ring), head(other.head),
+        tail(other.tail) {
+    other.head = other.tail;
+  }
+
+  buffer_pool(const buffer_pool &) = delete;
+
+  ~buffer_pool() {
+    while (head != tail)
+      delete[] ring[head++ % Capacity];
+  }
+
+  std::span<unsigned char> get_buffer() {
+    if (head == tail)
+      return {};
+
+    return {ring[head++ % Capacity], buffer_size};
+  }
+
+  bool release_buffer(unsigned char *buf) {
+    if (tail == head + Capacity)
+      return false;
+
+    ring[tail++ % Capacity] = buf;
+
+    return true;
+  }
+
+  bool add_new_buffer() {
+    if (tail == head + Capacity)
+      return false;
+
+    const auto buf = new (std::nothrow) unsigned char[buffer_size];
+    if (!buf)
+      return false;
+
+    ring[tail++ % Capacity] = buf;
+
+    return true;
+  }
+
+  bool reserve(size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+      if (!add_new_buffer())
+        return false;
+    }
+
+    return true;
+  }
+
+private:
+  size_t buffer_size;
+
+  std::array<unsigned char *, Capacity> ring;
+
+  size_t head = 0;
+  size_t tail = 0;
 };
 
 static void fill_buffer(std::span<unsigned char> buf) {
@@ -157,32 +190,32 @@ static bool run(bool fixed_files, BufferAllocator &buffers,
       break;
 
     for (;;) {
-      auto buf = buffers.get_buffer();
-      if (!buf) {
+      const auto buf = buffers.get_buffer();
+      if (!buf.data()) {
         std::println(stderr, "Not enough buffers.");
         break;
       }
 
       io_uring_sqe *sqe = io_uring_get_sqe(&queue->ring);
       if (!sqe) {
-        buffers.release_buffer(buf);
+        buffers.release_buffer(buf.data());
         break;
       }
 
-      fill_buffer(*buf);
+      fill_buffer(buf);
 
       if (fixed_files) {
-        io_uring_prep_sendto(sqe, 0, buf->data(), buf->size(), 0,
+        io_uring_prep_sendto(sqe, 0, buf.data(), buf.size(), 0,
                              reinterpret_cast<const sockaddr *>(&addr),
                              sizeof(addr));
         sqe->flags |= IOSQE_FIXED_FILE;
       } else {
-        io_uring_prep_sendto(sqe, socket->fd, buf->data(), buf->size(), 0,
+        io_uring_prep_sendto(sqe, socket->fd, buf.data(), buf.size(), 0,
                              reinterpret_cast<const sockaddr *>(&addr),
                              sizeof(addr));
       }
 
-      io_uring_sqe_set_data(sqe, buf);
+      io_uring_sqe_set_data(sqe, buf.data());
     }
 
     int ret = io_uring_submit(&queue->ring);
@@ -196,8 +229,7 @@ static bool run(bool fixed_files, BufferAllocator &buffers,
     unsigned int head;
     io_uring_cqe *cqe;
     io_uring_for_each_cqe(&queue->ring, head, cqe) {
-      buffers.release_buffer(
-          reinterpret_cast<BufferAllocator::buffer *>(cqe->user_data));
+      buffers.release_buffer(reinterpret_cast<unsigned char *>(cqe->user_data));
 
       if (cqe->res < 0) {
         std::println(stderr, "sendto: {}", strerror(-cqe->res));
@@ -217,12 +249,13 @@ static bool run(bool fixed_files, BufferAllocator &buffers,
 }
 
 int main() {
-  constexpr const size_t buffer_size = 16;
+  constexpr const size_t buf_size = 16;
+  constexpr const size_t buf_count = 256;
 
-  naive_buffer_allocator<buffer_size> naive_buf_alloc;
+  naive_buffer_allocator naive_buf_alloc(buf_size);
 
-  auto buf_pool = buffer_pool<buffer_size>::create_with_buffer_count(256);
-  if (!buf_pool) {
+  buffer_pool<buf_count> buf_pool(buf_size);
+  if (!buf_pool.reserve(buf_count)) {
     std::println(stderr, "Failed to create buffer pool.");
     return EXIT_FAILURE;
   }
@@ -230,10 +263,10 @@ int main() {
   if (!run(false, naive_buf_alloc, "basic"))
     return EXIT_FAILURE;
 
-  if (!run(false, *buf_pool, "buffer pool"))
+  if (!run(false, buf_pool, "buffer pool"))
     return EXIT_FAILURE;
 
-  if (!run(true, *buf_pool, "fixed files"))
+  if (!run(true, buf_pool, "fixed files"))
     return EXIT_FAILURE;
 
   return EXIT_SUCCESS;
