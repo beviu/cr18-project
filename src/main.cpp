@@ -147,11 +147,6 @@ private:
   size_t tail = 0;
 };
 
-static void fill_buffer(std::span<unsigned char> buf) {
-  for (size_t i = 0; i < buf.size(); ++i)
-    buf[i] = 'A' + i % 26;
-}
-
 template <class BufferAllocator>
 static bool run(bool fixed_files, BufferAllocator &buffers,
                 std::string_view name) {
@@ -201,8 +196,6 @@ static bool run(bool fixed_files, BufferAllocator &buffers,
         buffers.release_buffer(buf.data());
         break;
       }
-
-      fill_buffer(buf);
 
       if (fixed_files) {
         io_uring_prep_sendto(sqe, 0, buf.data(), buf.size(), 0,
