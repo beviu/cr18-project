@@ -114,9 +114,9 @@ private:
   std::list<std::unique_ptr<buffer>> free_buffers;
 };
 
-static void fill_buffer(std::span<unsigned char> buffer) {
-  for (unsigned char &c : buffer)
-    c = 'A' + (rand() % 26);
+static void fill_buffer(std::span<unsigned char> buf) {
+  for (size_t i = 0; i < buf.size(); ++i)
+    buf[i] = 'A' + i % 26;
 }
 
 template <class BufferAllocator>
