@@ -44,6 +44,51 @@ struct owned_io_uring {
   }
 };
 
+class owned_io_uring_buf_ring {
+public:
+  static std::expected<owned_io_uring_buf_ring, int>
+  setup(io_uring *ring, unsigned int entry_count, int buffer_group_id,
+        unsigned int flags) {
+    int err;
+
+    io_uring_buf_ring *buf_ring = io_uring_setup_buf_ring(
+        ring, entry_count, buffer_group_id, flags, &err);
+    if (!ring)
+      return std::unexpected(-err);
+
+    return owned_io_uring_buf_ring{ring, buf_ring, entry_count,
+                                   buffer_group_id};
+  }
+
+  owned_io_uring_buf_ring(io_uring *ring, io_uring_buf_ring *buf_ring,
+                          unsigned int entry_count, int buffer_group_id)
+      : buf_ring(buf_ring), entry_count_(entry_count),
+        buffer_group_id_(buffer_group_id) {}
+
+  owned_io_uring_buf_ring(owned_io_uring_buf_ring &&other)
+      : ring_(other.ring_) {
+    other.ring_ = nullptr;
+  }
+
+  owned_io_uring_buf_ring(const owned_io_uring_buf_ring &) = delete;
+
+  ~owned_io_uring_buf_ring() {
+    if (ring_ != nullptr)
+      io_uring_free_buf_ring(ring_, buf_ring, entry_count_, buffer_group_id_);
+  }
+
+  io_uring_buf_ring *operator*() const { return buf_ring; }
+  io_uring *ring() const { return ring_; }
+  unsigned int entry_count() const { return entry_count_; }
+  int buffer_group_id() const { return buffer_group_id_; }
+
+private:
+  io_uring *ring_;
+  io_uring_buf_ring *buf_ring = nullptr;
+  unsigned int entry_count_;
+  int buffer_group_id_;
+};
+
 struct owned_fd {
   int fd = -1;
 
