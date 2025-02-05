@@ -1,0 +1,8 @@
+[package]
+name = "cr18-project"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+io-uring = "0.7.4"
+libc = "0.2.169"
