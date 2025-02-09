@@ -17,6 +17,10 @@ struct Args {
     #[clap(short, long)]
     fixed_files: bool,
 
+    /// Use fixed buffers for sending.
+    #[clap(short, long)]
+    fixed_buffers: bool,
+
     /// Use a buffer ring.
     #[clap(short, long)]
     buf_ring: bool,
