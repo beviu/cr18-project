@@ -18,7 +18,7 @@ struct Args {
     fixed_files: bool,
 
     /// Use fixed buffers for sending.
-    #[clap(short, long)]
+    #[clap(short = 'F', long)]
     fixed_buffers: bool,
 
     /// Use zero-copy sends.
