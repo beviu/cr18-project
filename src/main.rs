@@ -21,6 +21,10 @@ struct Args {
     #[clap(short, long)]
     fixed_buffers: bool,
 
+    /// Use zero-copy sends.
+    #[clap(short, long)]
+    zero_copy: bool,
+
     /// Use a buffer ring.
     #[clap(short, long)]
     buf_ring: bool,
