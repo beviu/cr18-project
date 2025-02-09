@@ -140,6 +140,9 @@ fn main() {
             completion.sync();
 
             for entry in &mut completion {
+                if io_uring::cqueue::notif(entry.flags()) {
+                    continue;
+                }
                 if entry.result() < 0 {
                     eprintln!("sendto: {}", entry.result());
                     return;
