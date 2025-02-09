@@ -64,8 +64,10 @@ fn main() {
         }
     }
 
-    unsafe {
-        submitter.register_buffers(&iovecs).unwrap();
+    if args.fixed_buffers {
+        unsafe {
+            submitter.register_buffers(&iovecs).unwrap();
+        }
     }
 
     let start = Instant::now();
@@ -87,7 +89,7 @@ fn main() {
         if keep_sending {
             while !submission.is_full() {
                 let len = u32::try_from(BUF_SIZE).unwrap();
-                let send = if args.fixed_files {
+                let mut send = if args.fixed_files {
                     let fixed = io_uring::types::Fixed(0);
                     io_uring::opcode::SendZc::new(fixed, bufs[0], len)
                 } else {
@@ -95,8 +97,11 @@ fn main() {
                     io_uring::opcode::SendZc::new(fd, bufs[0], len)
                 };
 
+                if args.fixed_buffers {
+                    send = send.buf_index(Some(0));
+                }
+
                 let entry = send
-                    .buf_index(Some(0))
                     .dest_addr(&addr as *const libc::sockaddr_in as *const _)
                     .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
                     .build();
