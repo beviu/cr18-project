@@ -1,28 +1,47 @@
 use std::{
-    mem,
+    io, mem,
     net::UdpSocket,
     os::fd::AsRawFd,
     time::{Duration, Instant},
 };
 
+use buf_ring::{BufRing, BufRingMmap};
 use clap::Parser;
+
+mod buf_ring;
 
 #[derive(clap::Parser)]
 struct Args {
     /// Use fixed files instead of file descriptors.
     #[clap(short, long)]
     fixed_files: bool,
+
+    /// Use a buffer ring.
+    #[clap(short, long)]
+    buf_ring: bool,
 }
 
 fn main() {
     let args = Args::parse();
 
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
-    let mut ring = io_uring::IoUring::new(8).unwrap();
 
-    ring.submitter()
-        .register_files(&[socket.as_raw_fd()])
-        .unwrap();
+    let mut ring = io_uring::IoUring::new(8).unwrap();
+    let (submitter, mut submission, mut completion) = ring.split();
+
+    submitter.register_files(&[socket.as_raw_fd()]).unwrap();
+
+    let buf_ring_mmap = BufRingMmap::new(8).unwrap();
+    let mut buf_ring = BufRing::register(&submitter, 0, buf_ring_mmap).unwrap();
+
+    const BUF_SIZE: usize = 16;
+
+    for i in 0..buf_ring.entry_count() {
+        let buf = Box::new([0u8; BUF_SIZE]);
+
+        // Note: this leaks the memory.
+        unsafe { buf_ring.add_buffer(Box::into_raw(buf), i); }
+    }
 
     let start = Instant::now();
     let mut datagram_count = 0;
@@ -39,11 +58,8 @@ fn main() {
     let mut in_flight = 0;
 
     loop {
-        const BUF_SIZE: usize = 16;
-
         let keep_sending = start.elapsed() < Duration::from_secs(1);
         if keep_sending {
-            let mut submission = ring.submission();
             while !submission.is_full() {
                 let buf = Box::new([0u8; BUF_SIZE]);
 
@@ -75,10 +91,9 @@ fn main() {
         }
 
         if in_flight > 0 {
-            let mut completion = ring.completion();
             completion.sync();
 
-            for entry in completion {
+            for entry in &mut completion {
                 let _buf = unsafe { Box::from_raw(entry.user_data() as *mut [u8; BUF_SIZE]) };
                 if entry.result() < 0 {
                     eprintln!("sendto: {}", entry.result());
@@ -90,9 +105,9 @@ fn main() {
         }
 
         if in_flight > 0 {
-            ring.submitter().submit_and_wait(1).unwrap();
+            submitter.submit_and_wait(1).unwrap();
         } else {
-            ring.submitter().squeue_wait().unwrap();
+            submitter.squeue_wait().unwrap();
         }
     }
 
