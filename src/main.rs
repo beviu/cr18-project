@@ -89,22 +89,41 @@ fn main() {
         if keep_sending {
             while !submission.is_full() {
                 let len = u32::try_from(BUF_SIZE).unwrap();
-                let mut send = if args.fixed_files {
-                    let fixed = io_uring::types::Fixed(0);
-                    io_uring::opcode::SendZc::new(fixed, bufs[0], len)
+
+                let entry = if args.zero_copy {
+                    let mut send = if args.fixed_files {
+                        let fixed = io_uring::types::Fixed(0);
+                        io_uring::opcode::SendZc::new(fixed, bufs[0], len)
+                    } else {
+                        let fd = io_uring::types::Fd(socket.as_raw_fd());
+                        io_uring::opcode::SendZc::new(fd, bufs[0], len)
+                    };
+
+                    if args.fixed_buffers {
+                        send = send.buf_index(Some(0));
+                    }
+
+                    send.dest_addr(&addr as *const libc::sockaddr_in as *const _)
+                        .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
+                        .build()
                 } else {
-                    let fd = io_uring::types::Fd(socket.as_raw_fd());
-                    io_uring::opcode::SendZc::new(fd, bufs[0], len)
+                    let send = if args.fixed_files {
+                        let fixed = io_uring::types::Fixed(0);
+                        io_uring::opcode::Send::new(fixed, bufs[0], len)
+                    } else {
+                        let fd = io_uring::types::Fd(socket.as_raw_fd());
+                        io_uring::opcode::Send::new(fd, bufs[0], len)
+                    };
+
+                    if args.fixed_buffers {
+                        panic!("fixed buffers is only supported when zero-copy is enabled");
+                    }
+
+                    send.dest_addr(&addr as *const libc::sockaddr_in as *const _)
+                        .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
+                        .build()
                 };
 
-                if args.fixed_buffers {
-                    send = send.buf_index(Some(0));
-                }
-
-                let entry = send
-                    .dest_addr(&addr as *const libc::sockaddr_in as *const _)
-                    .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
-                    .build();
                 unsafe {
                     submission.push(&entry).unwrap();
                 }
