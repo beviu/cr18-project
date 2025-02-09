@@ -1,5 +1,9 @@
 use std::{
-    ffi::c_void, io, mem, net::UdpSocket, os::fd::AsRawFd, time::{Duration, Instant}
+    ffi::c_void,
+    io, mem,
+    net::UdpSocket,
+    os::fd::AsRawFd,
+    time::{Duration, Instant},
 };
 
 use buf_ring::{BufRing, BufRingMmap};
@@ -34,11 +38,14 @@ fn main() {
     const BUF_SIZE: usize = 16;
 
     let mut bufs = Vec::new();
+    let mut iovecs = Vec::new();
 
     for i in 0..buf_ring.entry_count() {
-        let mut buf = Box::new([0u8; BUF_SIZE]);
+        let mut buf = Box::new([1u8; BUF_SIZE]);
 
-        bufs.push(libc::iovec {
+        bufs.push(buf.as_mut_ptr());
+
+        iovecs.push(libc::iovec {
             iov_base: buf.as_mut_ptr() as *mut c_void,
             iov_len: buf.len(),
         });
@@ -50,7 +57,7 @@ fn main() {
     }
 
     unsafe {
-        submitter.register_buffers(&bufs).unwrap();
+        submitter.register_buffers(&iovecs).unwrap();
     }
 
     let start = Instant::now();
@@ -71,23 +78,20 @@ fn main() {
         let keep_sending = start.elapsed() < Duration::from_secs(1);
         if keep_sending {
             while !submission.is_full() {
-                let buf = Box::new([0u8; BUF_SIZE]);
-
-                let len = u32::try_from(buf.len()).unwrap();
-                let buf = Box::into_raw(buf) as *mut u8;
+                let len = u32::try_from(BUF_SIZE).unwrap();
                 let send = if args.fixed_files {
                     let fixed = io_uring::types::Fixed(0);
-                    io_uring::opcode::Send::new(fixed, buf, len)
+                    io_uring::opcode::SendZc::new(fixed, bufs[0], len)
                 } else {
                     let fd = io_uring::types::Fd(socket.as_raw_fd());
-                    io_uring::opcode::Send::new(fd, buf, len)
+                    io_uring::opcode::SendZc::new(fd, bufs[0], len)
                 };
 
                 let entry = send
+                    .buf_index(Some(0))
                     .dest_addr(&addr as *const libc::sockaddr_in as *const _)
                     .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
-                    .build()
-                    .user_data(buf as u64);
+                    .build();
                 unsafe {
                     submission.push(&entry).unwrap();
                 }
@@ -104,7 +108,6 @@ fn main() {
             completion.sync();
 
             for entry in &mut completion {
-                let _buf = unsafe { Box::from_raw(entry.user_data() as *mut [u8; BUF_SIZE]) };
                 if entry.result() < 0 {
                     eprintln!("sendto: {}", entry.result());
                     return;
