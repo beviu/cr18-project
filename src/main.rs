@@ -1,8 +1,5 @@
 use std::{
-    io, mem,
-    net::UdpSocket,
-    os::fd::AsRawFd,
-    time::{Duration, Instant},
+    ffi::c_void, io, mem, net::UdpSocket, os::fd::AsRawFd, time::{Duration, Instant}
 };
 
 use buf_ring::{BufRing, BufRingMmap};
@@ -36,11 +33,24 @@ fn main() {
 
     const BUF_SIZE: usize = 16;
 
+    let mut bufs = Vec::new();
+
     for i in 0..buf_ring.entry_count() {
-        let buf = Box::new([0u8; BUF_SIZE]);
+        let mut buf = Box::new([0u8; BUF_SIZE]);
+
+        bufs.push(libc::iovec {
+            iov_base: buf.as_mut_ptr() as *mut c_void,
+            iov_len: buf.len(),
+        });
 
         // Note: this leaks the memory.
-        unsafe { buf_ring.add_buffer(Box::into_raw(buf), i); }
+        unsafe {
+            buf_ring.add_buffer(Box::into_raw(buf), i);
+        }
+    }
+
+    unsafe {
+        submitter.register_buffers(&bufs).unwrap();
     }
 
     let start = Instant::now();

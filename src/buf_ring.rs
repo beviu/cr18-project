@@ -1,4 +1,7 @@
-use std::{io, mem, sync::atomic::{AtomicU16, Ordering}};
+use std::{
+    io, mem,
+    sync::atomic::{AtomicU16, Ordering},
+};
 
 use io_uring::{types::BufRingEntry, Submitter};
 use memmap2::MmapMut;
@@ -11,14 +14,17 @@ pub struct BufRingMmap {
     ///
     /// Must be positive.
     entry_count: u16,
-    
+
     mmap: memmap2::MmapMut,
 }
 
 impl BufRingMmap {
     pub fn new(entry_count: u16) -> io::Result<Self> {
         if entry_count == 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "buffer ring must contain at least one entry"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "buffer ring must contain at least one entry",
+            ));
         }
         let size = mem::size_of::<BufRingEntry>() * usize::from(entry_count);
         let mmap = MmapMut::map_anon(size)?;
@@ -55,11 +61,22 @@ pub struct BufRing<'a> {
 }
 
 impl<'a> BufRing<'a> {
-    pub fn register(submitter: &'a Submitter<'a>, bgid: u16, mut mmap: BufRingMmap) -> io::Result<Self> {
+    pub fn register(
+        submitter: &'a Submitter<'a>,
+        bgid: u16,
+        mut mmap: BufRingMmap,
+    ) -> io::Result<Self> {
         let tail = mmap.tail().load(Ordering::Relaxed);
         let ring_addr = mmap.as_mut_ptr();
-        unsafe { submitter.register_buf_ring(ring_addr as u64, mmap.entry_count, bgid)?; }
-        Ok(Self { submitter, bgid, mmap, tail })
+        unsafe {
+            submitter.register_buf_ring(ring_addr as u64, mmap.entry_count, bgid)?;
+        }
+        Ok(Self {
+            submitter,
+            bgid,
+            mmap,
+            tail,
+        })
     }
 
     pub fn entry_count(&self) -> u16 {
@@ -82,6 +99,8 @@ impl<'a> BufRing<'a> {
 
 impl<'a> Drop for BufRing<'a> {
     fn drop(&mut self) {
-        self.submitter.unregister_buf_ring(self.bgid).expect("failed to unregister buffer ring");
+        self.submitter
+            .unregister_buf_ring(self.bgid)
+            .expect("failed to unregister buffer ring");
     }
 }
