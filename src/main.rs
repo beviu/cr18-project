@@ -47,7 +47,9 @@ fn send_datagrams(
     let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
 
-    submitter.register_files(&[socket.as_raw_fd()]).unwrap();
+    if fixed_files {
+        submitter.register_files(&[socket.as_raw_fd()]).unwrap();
+    }
 
     let buf_ring_mmap = BufRingMmap::new(8).unwrap();
     let mut buf_ring = BufRing::register(&submitter, 0, buf_ring_mmap).unwrap();
