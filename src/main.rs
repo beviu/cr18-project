@@ -176,28 +176,30 @@ fn main() {
 
     let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
 
-    let threads = args
+    let thread_count = args
         .threads
         .unwrap_or_else(|| thread::available_parallelism().unwrap());
 
-    let datagram_count = AtomicU64::new(0);
+    let datagram_count: u64 = thread::scope(|s| {
+        let mut threads = Vec::new();
 
-    thread::scope(|s| {
-        for _ in 0..threads.get() {
-            s.spawn(|| {
-                datagram_count.fetch_add(
-                    send_datagrams(
-                        &socket,
-                        args.fixed_files,
-                        args.fixed_buffers,
-                        args.zero_copy,
-                        args.buf_ring,
-                    ),
-                    Ordering::Relaxed,
-                );
-            });
+        for _ in 0..thread_count.get() {
+            threads.push(s.spawn(|| {
+                send_datagrams(
+                    &socket,
+                    args.fixed_files,
+                    args.fixed_buffers,
+                    args.zero_copy,
+                    args.buf_ring,
+                )
+            }));
         }
+
+        threads
+            .into_iter()
+            .map(|t| t.join().expect("thread panicked"))
+            .sum()
     });
 
-    println!("basic: {}", datagram_count.load(Ordering::Relaxed));
+    println!("basic: {}", datagram_count);
 }
