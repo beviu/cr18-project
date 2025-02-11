@@ -47,11 +47,11 @@ struct Args {
 
 fn send_datagrams(
     socket: &UdpSocket,
-    mut ring: io_uring::IoUring,
     fixed_files: bool,
     fixed_buffers: bool,
     zero_copy: bool,
 ) -> u64 {
+    let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
 
     if fixed_files {
@@ -180,7 +180,8 @@ fn send_datagrams(
     datagram_count
 }
 
-fn receive_datagrams(socket: &UdpSocket, mut ring: io_uring::IoUring, fixed_files: bool, fixed_buffers: bool) -> u64 {
+fn receive_datagrams(socket: &UdpSocket, fixed_files: bool, fixed_buffers: bool) -> u64 {
+    let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
 
     if fixed_files {
@@ -336,18 +337,14 @@ fn main() {
 
     let datagram_count: u64 = thread::scope(|s| {
         let mut threads = Vec::new();
-        let mut rings = Vec::new();
 
         for _ in 0..thread_count.get() {
-            let ring = io_uring::IoUring::new(8).unwrap();
-            rings.push(ring.as_raw_fd());
             threads.push(s.spawn(|| {
                 if args.server {
-                    receive_datagrams(&socket, ring, args.fixed_files, args.fixed_buffers)
+                    receive_datagrams(&socket, args.fixed_files, args.fixed_buffers)
                 } else {
                     send_datagrams(
                         &socket,
-                        ring,
                         args.fixed_files,
                         args.fixed_buffers,
                         args.zero_copy,
