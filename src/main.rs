@@ -3,7 +3,7 @@ use std::{
     fs::File,
     io,
     mem::{self, MaybeUninit},
-    net::UdpSocket,
+    net::{SocketAddr, UdpSocket},
     num::NonZeroUsize,
     os::fd::{AsRawFd, FromRawFd},
     ptr,
@@ -46,10 +46,21 @@ struct Args {
     /// The address to bind the socket to.
     #[clap(short = 'B', long, default_value = "[::]:0")]
     bind: String,
+
+    /// The address to send datagrams to.
+    #[clap(short, long, default_value = "[::]:12000")]
+    dest: SocketAddr,
+}
+
+#[repr(C)]
+union sockaddr_in {
+    in_: libc::sockaddr_in,
+    in6: libc::sockaddr_in6,
 }
 
 fn send_datagrams(
     socket: &UdpSocket,
+    dest: &SocketAddr,
     fixed_files: bool,
     fixed_buffers: bool,
     zero_copy: bool,
@@ -97,13 +108,32 @@ fn send_datagrams(
         }
     }
 
-    let addr = libc::sockaddr_in {
-        sin_family: u16::try_from(libc::AF_INET).unwrap(),
-        sin_port: 12000u16.to_be(),
-        sin_addr: libc::in_addr {
-            s_addr: libc::INADDR_LOOPBACK.to_be(),
-        },
-        sin_zero: [0; 8],
+    let (addr, addr_len) = match dest {
+        SocketAddr::V4(v4) => {
+            let in_ = libc::sockaddr_in {
+                sin_family: u16::try_from(libc::AF_INET).unwrap(),
+                sin_port: v4.port().to_be(),
+                sin_addr: libc::in_addr {
+                    s_addr: v4.ip().to_bits().to_be(),
+                },
+                sin_zero: [0; 8],
+            };
+            let addr_len = u32::try_from(mem::size_of_val(&in_)).unwrap();
+            (sockaddr_in { in_ }, addr_len)
+        }
+        SocketAddr::V6(v6) => {
+            let in6 = libc::sockaddr_in6 {
+                sin6_family: u16::try_from(libc::AF_INET6).unwrap(),
+                sin6_port: v6.port().to_be(),
+                sin6_flowinfo: v6.flowinfo(),
+                sin6_addr: libc::in6_addr {
+                    s6_addr: v6.ip().octets(),
+                },
+                sin6_scope_id: v6.scope_id(),
+            };
+            let addr_len = u32::try_from(mem::size_of_val(&in6)).unwrap();
+            (sockaddr_in { in6 }, addr_len)
+        }
     };
 
     let mut datagram_count = 0;
@@ -127,8 +157,8 @@ fn send_datagrams(
                         send = send.buf_index(Some(0));
                     }
 
-                    send.dest_addr(&addr as *const libc::sockaddr_in as *const _)
-                        .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
+                    send.dest_addr(&addr as *const sockaddr_in as *const _)
+                        .dest_addr_len(addr_len)
                         .build()
                 } else {
                     let send = if fixed_files {
@@ -143,8 +173,8 @@ fn send_datagrams(
                         panic!("fixed buffers is only supported when zero-copy is enabled");
                     }
 
-                    send.dest_addr(&addr as *const libc::sockaddr_in as *const _)
-                        .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
+                    send.dest_addr(&addr as *const sockaddr_in as *const _)
+                        .dest_addr_len(addr_len)
                         .build()
                 };
                 let entry = entry.user_data(USER_DATA_SEND);
@@ -398,6 +428,7 @@ fn main() {
                 } else {
                     send_datagrams(
                         &socket,
+                        &args.dest,
                         args.fixed_files,
                         args.fixed_buffers,
                         args.zero_copy,
