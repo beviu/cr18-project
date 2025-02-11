@@ -11,15 +11,13 @@ use std::{
     thread,
 };
 
-use buf_ring::{BufRing, BufRingMmap};
 use clap::Parser;
 use io_uring::{
     cqueue, squeue,
-    types::{CancelBuilder, TimeoutFlags, Timespec},
+    types::{BufRingEntry, CancelBuilder, TimeoutFlags, Timespec},
     IoUring,
 };
-
-mod buf_ring;
+use io_uring_buf_ring::IoUringBufRing;
 
 #[derive(clap::Parser)]
 struct Args {
@@ -264,39 +262,32 @@ fn receive_datagrams(
     let mut ring = builder
         .build(8)
         .expect("failed to create thread io_uring instance");
-    let (submitter, mut submission, mut completion) = ring.split();
 
     if fixed_files {
-        submitter.register_files(&[socket.as_raw_fd()]).unwrap();
+        ring.submitter()
+            .register_files(&[socket.as_raw_fd()])
+            .unwrap();
     }
 
-    let buf_ring_mmap = BufRingMmap::new(8).unwrap();
-    let mut buf_ring = BufRing::register(&submitter, 0, buf_ring_mmap).unwrap();
+    let buf_ring = IoUringBufRing::new(&ring, 8, 0, 16).expect("failed to create buf_ring");
 
     const BUF_SIZE: usize = 16;
 
-    let mut bufs = Vec::new();
     let mut iovecs = Vec::new();
+    let mut bufs = Vec::new();
 
-    for i in 0..buf_ring.entry_count() {
+    for i in 0..8 {
         let mut buf = Box::new([1u8; BUF_SIZE]);
-
-        bufs.push(buf.as_mut_ptr());
-
         iovecs.push(libc::iovec {
             iov_base: buf.as_mut_ptr() as *mut c_void,
             iov_len: buf.len(),
         });
-
-        // Note: this leaks the memory.
-        unsafe {
-            buf_ring.add_buffer(Box::into_raw(buf), i);
-        }
+        bufs.push(buf);
     }
 
     if fixed_buffers {
         unsafe {
-            submitter.register_buffers(&iovecs).unwrap();
+            ring.submitter().register_buffers(&iovecs).unwrap();
         }
     }
 
@@ -310,40 +301,36 @@ fn receive_datagrams(
         )
         .build()
         .user_data(1);
+
+        let mut submission = ring.submission();
         unsafe {
             submission.push(&wait).unwrap();
         }
-        submission.sync();
     }
 
     let mut datagram_count = 0;
 
     'main_loop: while stop.load(Ordering::Relaxed) == 0 {
-        submission.sync();
-
-        if !submission.is_full() {
+        {
+            let mut submission = ring.submission();
             while !submission.is_full() {
                 let len = u32::try_from(BUF_SIZE).unwrap();
 
                 let entry = if fixed_files {
                     let fixed = io_uring::types::Fixed(0);
-                    io_uring::opcode::Recv::new(fixed, bufs[0], len).build()
+                    io_uring::opcode::Recv::new(fixed, bufs[0].as_mut_ptr(), len).build()
                 } else {
                     let fd = io_uring::types::Fd(socket.as_raw_fd());
-                    io_uring::opcode::Recv::new(fd, bufs[0], len).build()
+                    io_uring::opcode::Recv::new(fd, bufs[0].as_mut_ptr(), len).build()
                 };
 
                 unsafe {
                     submission.push(&entry).unwrap();
                 }
             }
-
-            submission.sync();
         }
 
-        completion.sync();
-
-        for entry in &mut completion {
+        for entry in ring.completion() {
             if entry.user_data() == 1 {
                 if entry.result() < 0 {
                     eprintln!("futex_wait: {}", entry.result());
@@ -357,12 +344,16 @@ fn receive_datagrams(
             datagram_count += 1;
         }
 
-        submitter.submit_and_wait(1).unwrap();
+        ring.submitter().submit_and_wait(1).unwrap();
     }
 
-    submitter
+    ring.submitter()
         .register_sync_cancel(None, CancelBuilder::any())
         .expect("failed to cancel pending requests");
+
+    if let Err(err) = unsafe { buf_ring.release(&ring) } {
+        eprintln!("failed to release buf_ring: {err}");
+    }
 
     datagram_count
 }
