@@ -24,6 +24,8 @@
         {
           default = pkgs.mkShell {
             packages = [
+              pkgs.cargo
+              pkgs.clippy
               pkgs.clang-tools
               pkgs.clang
               pkgs.meson
