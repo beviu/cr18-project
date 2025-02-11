@@ -42,6 +42,10 @@ struct Args {
     /// Run as a server instead of a client.
     #[clap(short, long)]
     server: bool,
+
+    /// The address to bind the socket to.
+    #[clap(short = 'B', long, default_value = "[::]:0")]
+    bind: String,
 }
 
 fn send_datagrams(
@@ -342,7 +346,7 @@ fn futex_wake_all(futex: &AtomicU32) {
 fn main() {
     let args = Args::parse();
 
-    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let socket = UdpSocket::bind(args.bind).expect("failed to bind socket");
 
     let thread_count = args
         .threads
