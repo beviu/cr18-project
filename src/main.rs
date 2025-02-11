@@ -94,7 +94,7 @@ fn send_datagrams(
             stop.as_ptr() as *const _,
             0,
             libc::FUTEX_BITSET_MATCH_ANY as c_uint as u64,
-            FUTEX2_SIZE_U32,
+            FUTEX2_SIZE_U32 | libc::FUTEX_PRIVATE_FLAG as u32,
         )
         .build()
         .user_data(1);
@@ -168,33 +168,27 @@ fn send_datagrams(
             break;
         }
 
-        if in_flight > 0 {
-            completion.sync();
+        completion.sync();
 
-            for entry in &mut completion {
-                if entry.user_data() == 1 {
-                    if entry.result() < 0 {
-                        eprintln!("futex_wait: {}", entry.result());
-                    }
-                    break 'main_loop;
-                }
-                if io_uring::cqueue::notif(entry.flags()) {
-                    continue;
-                }
+        for entry in &mut completion {
+            if entry.user_data() == 1 {
                 if entry.result() < 0 {
-                    eprintln!("sendto: {}", entry.result());
-                    break 'main_loop;
+                    eprintln!("futex_wait: {}", entry.result());
                 }
-                datagram_count += 1;
-                in_flight -= 1;
+                break 'main_loop;
             }
+            if io_uring::cqueue::notif(entry.flags()) {
+                continue;
+            }
+            if entry.result() < 0 {
+                eprintln!("sendto: {}", entry.result());
+                break 'main_loop;
+            }
+            datagram_count += 1;
+            in_flight -= 1;
         }
 
-        if in_flight > 0 {
-            submitter.submit_and_wait(1).unwrap();
-        } else {
-            submitter.squeue_wait().unwrap();
-        }
+        submitter.submit_and_wait(1).unwrap();
     }
 
     datagram_count
@@ -249,7 +243,7 @@ fn receive_datagrams(
             stop.as_ptr() as *const _,
             0,
             libc::FUTEX_BITSET_MATCH_ANY as c_uint as u64,
-            FUTEX2_SIZE_U32,
+            FUTEX2_SIZE_U32 | libc::FUTEX_PRIVATE_FLAG as c_uint,
         )
         .build()
         .user_data(1);
@@ -288,33 +282,27 @@ fn receive_datagrams(
             break;
         }
 
-        if in_flight > 0 {
-            completion.sync();
+        completion.sync();
 
-            for entry in &mut completion {
-                if entry.user_data() == 1 {
-                    if entry.result() < 0 {
-                        eprintln!("futex_wait: {}", entry.result());
-                    }
-                    break 'main_loop;
-                }
-                if io_uring::cqueue::notif(entry.flags()) {
-                    continue;
-                }
+        for entry in &mut completion {
+            if entry.user_data() == 1 {
                 if entry.result() < 0 {
-                    eprintln!("recv: {}", entry.result());
-                    return datagram_count;
+                    eprintln!("futex_wait: {}", entry.result());
                 }
-                datagram_count += 1;
-                in_flight -= 1;
+                break 'main_loop;
             }
+            if io_uring::cqueue::notif(entry.flags()) {
+                continue;
+            }
+            if entry.result() < 0 {
+                eprintln!("recv: {}", entry.result());
+                return datagram_count;
+            }
+            datagram_count += 1;
+            in_flight -= 1;
         }
 
-        if in_flight > 0 {
-            submitter.submit_and_wait(1).unwrap();
-        } else {
-            submitter.squeue_wait().unwrap();
-        }
+        submitter.submit_and_wait(1).unwrap();
     }
 
     datagram_count
@@ -350,6 +338,13 @@ fn signalfd_full(flags: i32) -> io::Result<File> {
 
     let file = unsafe { File::from_raw_fd(fd) };
     Ok(file)
+}
+
+fn futex_wake_all(futex: &AtomicU32) {
+    let op = libc::FUTEX_WAKE | libc::FUTEX_PRIVATE_FLAG;
+    unsafe {
+        libc::syscall(libc::SYS_futex, futex.as_ptr(), op, i32::MAX);
+    }
 }
 
 fn main() {
@@ -406,6 +401,7 @@ fn main() {
             .expect("failed to wait on main io_uring instance");
 
         stop.store(1, Ordering::Relaxed);
+        futex_wake_all(&stop);
 
         threads
             .into_iter()
