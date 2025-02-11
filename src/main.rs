@@ -356,40 +356,42 @@ fn main() {
 
     let signalfd = signalfd_full(libc::SFD_CLOEXEC).expect("failed to create signalfd");
 
-    let mut ring = io_uring::IoUring::new(8).expect("failed to create io_uring instance");
+    let mut main_ring = io_uring::IoUring::new(8).expect("failed to create io_uring instance");
 
     let mut siginfo: MaybeUninit<libc::signalfd_siginfo> = MaybeUninit::uninit();
 
     {
-        let mut submission = ring.submission();
-
         let timespec = Timespec::new().sec(1);
 
-        if !args.server {
-            let timeout = io_uring::opcode::Timeout::new(&timespec)
-                .flags(TimeoutFlags::BOOTTIME)
-                .build();
+        {
+            let mut submission = main_ring.submission();
+
+            if !args.server {
+                let timeout = io_uring::opcode::Timeout::new(&timespec)
+                    .flags(TimeoutFlags::BOOTTIME)
+                    .build();
+                unsafe {
+                    submission.push(&timeout).unwrap();
+                }
+            }
+
+            let fd = io_uring::types::Fd(signalfd.as_raw_fd());
+            let read = io_uring::opcode::Read::new(
+                fd,
+                siginfo.as_mut_ptr() as *mut _,
+                u32::try_from(mem::size_of_val(&siginfo)).unwrap(),
+            )
+            .build();
             unsafe {
-                submission.push(&timeout).unwrap();
+                submission.push(&read).unwrap();
             }
         }
 
-        let fd = io_uring::types::Fd(signalfd.as_raw_fd());
-        // TOOD: Will this cause UB due to pointer/reference aliasing rules?
-        let read = io_uring::opcode::Read::new(
-            fd,
-            siginfo.as_mut_ptr() as *mut _,
-            u32::try_from(mem::size_of_val(&siginfo)).unwrap(),
-        )
-        .build();
-        unsafe {
-            submission.push(&read).unwrap();
-        }
+        main_ring
+            .submitter()
+            .submit()
+            .expect("failed to submit SQEs on main io_uring instance");
     }
-
-    ring.submitter()
-        .submit()
-        .expect("failed to submit SQEs on main io_uring instance");
 
     let stop = AtomicU32::new(0);
 
@@ -413,10 +415,11 @@ fn main() {
         }
 
         loop {
-            ring.submitter()
+            main_ring
+                .submitter()
                 .submit_and_wait(1)
                 .expect("failed to wait on main io_uring instance");
-            if ring.completion().next().is_some() {
+            if main_ring.completion().next().is_some() {
                 break;
             }
         }
