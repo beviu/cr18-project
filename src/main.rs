@@ -361,10 +361,18 @@ fn main() {
     let mut siginfo: MaybeUninit<libc::signalfd_siginfo> = MaybeUninit::uninit();
 
     {
+        let mut submission = ring.submission();
+
         let timespec = Timespec::new().sec(1);
-        let timeout = io_uring::opcode::Timeout::new(&timespec)
-            .flags(TimeoutFlags::BOOTTIME)
-            .build();
+
+        if !args.server {
+            let timeout = io_uring::opcode::Timeout::new(&timespec)
+                .flags(TimeoutFlags::BOOTTIME)
+                .build();
+            unsafe {
+                submission.push(&timeout).unwrap();
+            }
+        }
 
         let fd = io_uring::types::Fd(signalfd.as_raw_fd());
         // TOOD: Will this cause UB due to pointer/reference aliasing rules?
@@ -374,15 +382,14 @@ fn main() {
             u32::try_from(mem::size_of_val(&siginfo)).unwrap(),
         )
         .build();
-
         unsafe {
-            ring.submission().push_multiple(&[timeout, read]).unwrap();
+            submission.push(&read).unwrap();
         }
-
-        ring.submitter()
-            .submit()
-            .expect("failed to submit SQEs on main io_uring instance");
     }
+
+    ring.submitter()
+        .submit()
+        .expect("failed to submit SQEs on main io_uring instance");
 
     let stop = AtomicU32::new(0);
 
