@@ -1,10 +1,11 @@
 use std::{
     ffi::c_void,
+    fs::File,
     io,
     mem::{self, MaybeUninit},
     net::UdpSocket,
     num::NonZeroUsize,
-    os::fd::AsRawFd,
+    os::fd::{AsRawFd, FromRawFd, OwnedFd},
     ptr,
     sync::atomic::{AtomicU64, Ordering},
     thread,
@@ -275,7 +276,6 @@ fn receive_datagrams(socket: &UdpSocket, fixed_files: bool, fixed_buffers: bool)
 
 fn mask_sigint() -> io::Result<()> {
     let mut mask: MaybeUninit<libc::sigset_t> = MaybeUninit::uninit();
-
     unsafe {
         libc::sigemptyset(mask.as_mut_ptr());
     }
@@ -291,6 +291,21 @@ fn mask_sigint() -> io::Result<()> {
     Ok(())
 }
 
+fn signalfd_full(flags: i32) -> io::Result<File> {
+    let mut mask: MaybeUninit<libc::sigset_t> = MaybeUninit::uninit();
+    unsafe {
+        libc::sigfillset(mask.as_mut_ptr());
+    }
+
+    let fd = unsafe { libc::signalfd(-1, mask.as_ptr(), flags) };
+    if fd == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let file = unsafe { File::from_raw_fd(fd) };
+    Ok(file)
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -301,6 +316,8 @@ fn main() {
         .unwrap_or_else(|| thread::available_parallelism().unwrap());
 
     mask_sigint().expect("failed to mask SIGINT");
+
+    let signalfd = signalfd_full(libc::SFD_CLOEXEC).expect("failed to create signalfd");
 
     let datagram_count: u64 = thread::scope(|s| {
         let mut threads = Vec::new();
