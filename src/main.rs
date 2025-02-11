@@ -319,6 +319,8 @@ fn main() {
 
     let signalfd = signalfd_full(libc::SFD_CLOEXEC).expect("failed to create signalfd");
 
+    let ring = io_uring::IoUring::new(8).expect("failed to create io_uring instance");
+
     let datagram_count: u64 = thread::scope(|s| {
         let mut threads = Vec::new();
 
@@ -335,6 +337,12 @@ fn main() {
                     )
                 }
             }));
+        }
+
+        loop {
+            ring.submitter()
+                .submit_and_wait(1)
+                .expect("failed to wait on main io_uring instance");
         }
 
         threads
