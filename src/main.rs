@@ -14,6 +14,7 @@ use std::{
 
 use buf_ring::{BufRing, BufRingMmap};
 use clap::Parser;
+use io_uring::types::{TimeoutFlags, Timespec};
 
 mod buf_ring;
 
@@ -319,7 +320,20 @@ fn main() {
 
     let signalfd = signalfd_full(libc::SFD_CLOEXEC).expect("failed to create signalfd");
 
-    let ring = io_uring::IoUring::new(8).expect("failed to create io_uring instance");
+    let mut ring = io_uring::IoUring::new(8).expect("failed to create io_uring instance");
+
+    {
+        let timespec = Timespec::new().sec(1);
+        let timeout = io_uring::opcode::Timeout::new(&timespec)
+            .flags(TimeoutFlags::BOOTTIME)
+            .build();
+
+        unsafe {
+            ring.submission().push(&timeout).unwrap();
+        }
+
+        ring.submitter().submit().expect("failed to submit timeout");
+    }
 
     let datagram_count: u64 = thread::scope(|s| {
         let mut threads = Vec::new();
@@ -339,11 +353,9 @@ fn main() {
             }));
         }
 
-        loop {
-            ring.submitter()
-                .submit_and_wait(1)
-                .expect("failed to wait on main io_uring instance");
-        }
+        ring.submitter()
+            .submit_and_wait(1)
+            .expect("failed to wait on main io_uring instance");
 
         threads
             .into_iter()
