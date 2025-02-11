@@ -56,39 +56,24 @@ fn send_datagrams(
     stop: &AtomicU32,
 ) -> u64 {
     let mut ring = io_uring::IoUring::new(8).unwrap();
-    let (submitter, mut submission, mut completion) = ring.split();
 
     if fixed_files {
-        submitter.register_files(&[socket.as_raw_fd()]).unwrap();
+        ring.submitter()
+            .register_files(&[socket.as_raw_fd()])
+            .unwrap();
     }
 
-    let buf_ring_mmap = BufRingMmap::new(8).unwrap();
-    let mut buf_ring = BufRing::register(&submitter, 0, buf_ring_mmap).unwrap();
-
-    const BUF_SIZE: usize = 16;
-
-    let mut bufs = Vec::new();
-    let mut iovecs = Vec::new();
-
-    for i in 0..buf_ring.entry_count() {
-        let mut buf = Box::new([1u8; BUF_SIZE]);
-
-        bufs.push(buf.as_mut_ptr());
-
-        iovecs.push(libc::iovec {
-            iov_base: buf.as_mut_ptr() as *mut c_void,
-            iov_len: buf.len(),
-        });
-
-        // Note: this leaks the memory.
-        unsafe {
-            buf_ring.add_buffer(Box::into_raw(buf), i);
-        }
-    }
+    const DATAGRAM: [u8; 16] = [1; 16];
 
     if fixed_buffers {
+        let iovec = libc::iovec {
+            iov_base: DATAGRAM.as_ptr() as *mut _,
+            iov_len: DATAGRAM.len(),
+        };
         unsafe {
-            submitter.register_buffers(&iovecs).unwrap();
+            ring.submitter()
+                .register_buffers(&[iovec])
+                .expect("failed to register send buffer");
         }
     }
 
@@ -102,10 +87,11 @@ fn send_datagrams(
         )
         .build()
         .user_data(1);
+
+        let mut submission = ring.submission();
         unsafe {
             submission.push(&wait).unwrap();
         }
-        submission.sync();
     }
 
     let addr = libc::sockaddr_in {
@@ -123,16 +109,17 @@ fn send_datagrams(
     'main_loop: loop {
         let keep_sending = stop.load(Ordering::Relaxed) == 0;
         if keep_sending {
+            let mut submission = ring.submission();
             while !submission.is_full() {
-                let len = u32::try_from(BUF_SIZE).unwrap();
+                let datagram_len = u32::try_from(DATAGRAM.len()).unwrap();
 
                 let entry = if zero_copy {
                     let mut send = if fixed_files {
                         let fixed = io_uring::types::Fixed(0);
-                        io_uring::opcode::SendZc::new(fixed, bufs[0], len)
+                        io_uring::opcode::SendZc::new(fixed, DATAGRAM.as_ptr(), datagram_len)
                     } else {
                         let fd = io_uring::types::Fd(socket.as_raw_fd());
-                        io_uring::opcode::SendZc::new(fd, bufs[0], len)
+                        io_uring::opcode::SendZc::new(fd, DATAGRAM.as_ptr(), datagram_len)
                     };
 
                     if fixed_buffers {
@@ -145,10 +132,10 @@ fn send_datagrams(
                 } else {
                     let send = if fixed_files {
                         let fixed = io_uring::types::Fixed(0);
-                        io_uring::opcode::Send::new(fixed, bufs[0], len)
+                        io_uring::opcode::Send::new(fixed, DATAGRAM.as_ptr(), datagram_len)
                     } else {
                         let fd = io_uring::types::Fd(socket.as_raw_fd());
-                        io_uring::opcode::Send::new(fd, bufs[0], len)
+                        io_uring::opcode::Send::new(fd, DATAGRAM.as_ptr(), datagram_len)
                     };
 
                     if fixed_buffers {
@@ -166,15 +153,11 @@ fn send_datagrams(
 
                 in_flight += 1;
             }
-
-            submission.sync();
         } else if in_flight == 0 {
             break;
         }
 
-        completion.sync();
-
-        for entry in &mut completion {
+        for entry in ring.completion() {
             if entry.user_data() == 1 {
                 if entry.result() < 0 {
                     eprintln!("futex_wait: {}", entry.result());
@@ -192,7 +175,7 @@ fn send_datagrams(
             in_flight -= 1;
         }
 
-        submitter.submit_and_wait(1).unwrap();
+        ring.submitter().submit_and_wait(1).unwrap();
     }
 
     datagram_count
