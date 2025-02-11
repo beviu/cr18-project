@@ -253,12 +253,12 @@ fn receive_datagrams(
         submission.sync();
     }
 
-    let mut in_flight = 0;
     let mut datagram_count = 0;
 
-    'main_loop: loop {
-        let keep_receiving = stop.load(Ordering::Relaxed) == 0;
-        if keep_receiving {
+    'main_loop: while stop.load(Ordering::Relaxed) == 0 {
+        submission.sync();
+
+        if !submission.is_full() {
             while !submission.is_full() {
                 let len = u32::try_from(BUF_SIZE).unwrap();
 
@@ -273,13 +273,9 @@ fn receive_datagrams(
                 unsafe {
                     submission.push(&entry).unwrap();
                 }
-
-                in_flight += 1;
             }
 
             submission.sync();
-        } else if in_flight == 0 {
-            break;
         }
 
         completion.sync();
@@ -291,15 +287,11 @@ fn receive_datagrams(
                 }
                 break 'main_loop;
             }
-            if io_uring::cqueue::notif(entry.flags()) {
-                continue;
-            }
             if entry.result() < 0 {
                 eprintln!("recv: {}", entry.result());
-                return datagram_count;
+                break 'main_loop;
             }
             datagram_count += 1;
-            in_flight -= 1;
         }
 
         submitter.submit_and_wait(1).unwrap();
