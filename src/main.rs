@@ -13,7 +13,7 @@ use std::{
 
 use buf_ring::{BufRing, BufRingMmap};
 use clap::Parser;
-use io_uring::types::{TimeoutFlags, Timespec};
+use io_uring::types::{CancelBuilder, TimeoutFlags, Timespec};
 
 mod buf_ring;
 
@@ -103,12 +103,10 @@ fn send_datagrams(
         sin_zero: [0; 8],
     };
 
-    let mut in_flight = 0;
     let mut datagram_count = 0;
 
-    'main_loop: loop {
-        let keep_sending = stop.load(Ordering::Relaxed) == 0;
-        if keep_sending {
+    'main_loop: while stop.load(Ordering::Relaxed) == 0 {
+        {
             let mut submission = ring.submission();
             while !submission.is_full() {
                 let datagram_len = u32::try_from(DATAGRAM.len()).unwrap();
@@ -150,11 +148,7 @@ fn send_datagrams(
                 unsafe {
                     submission.push(&entry).unwrap();
                 }
-
-                in_flight += 1;
             }
-        } else if in_flight == 0 {
-            break;
         }
 
         for entry in ring.completion() {
@@ -172,11 +166,14 @@ fn send_datagrams(
                 break 'main_loop;
             }
             datagram_count += 1;
-            in_flight -= 1;
         }
 
         ring.submitter().submit_and_wait(1).unwrap();
     }
+
+    ring.submitter()
+        .register_sync_cancel(None, CancelBuilder::any())
+        .expect("failed to cancel pending requests");
 
     datagram_count
 }
@@ -283,6 +280,10 @@ fn receive_datagrams(
 
         submitter.submit_and_wait(1).unwrap();
     }
+
+    submitter
+        .register_sync_cancel(None, CancelBuilder::any())
+        .expect("failed to cancel pending requests");
 
     datagram_count
 }
