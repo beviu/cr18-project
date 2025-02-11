@@ -13,7 +13,11 @@ use std::{
 
 use buf_ring::{BufRing, BufRingMmap};
 use clap::Parser;
-use io_uring::types::{CancelBuilder, TimeoutFlags, Timespec};
+use io_uring::{
+    cqueue, squeue,
+    types::{CancelBuilder, TimeoutFlags, Timespec},
+    IoUring,
+};
 
 mod buf_ring;
 
@@ -50,6 +54,10 @@ struct Args {
     /// The address to send datagrams to.
     #[clap(short, long, default_value = "[::]:12000")]
     dest: SocketAddr,
+
+    /// Use io_uring's `IORING_SETUP_SINGLE_ISSUER` option.
+    #[clap(long)]
+    single_issuer: bool,
 }
 
 #[repr(C)]
@@ -64,9 +72,18 @@ fn send_datagrams(
     fixed_files: bool,
     fixed_buffers: bool,
     zero_copy: bool,
+    single_issuer: bool,
     stop: &AtomicU32,
 ) -> u64 {
-    let mut ring = io_uring::IoUring::new(8).unwrap();
+    let mut builder: io_uring::Builder<squeue::Entry, cqueue::Entry> = IoUring::builder();
+
+    if single_issuer {
+        builder.setup_single_issuer();
+    }
+
+    let mut ring = builder
+        .build(8)
+        .expect("failed to create thread io_uring instance");
 
     if fixed_files {
         ring.submitter()
@@ -221,9 +238,18 @@ fn receive_datagrams(
     socket: &UdpSocket,
     fixed_files: bool,
     fixed_buffers: bool,
+    single_issuer: bool,
     stop: &AtomicU32,
 ) -> u64 {
-    let mut ring = io_uring::IoUring::new(8).unwrap();
+    let mut builder: io_uring::Builder<squeue::Entry, cqueue::Entry> = IoUring::builder();
+
+    if single_issuer {
+        builder.setup_single_issuer();
+    }
+
+    let mut ring = builder
+        .build(8)
+        .expect("failed to create thread io_uring instance");
     let (submitter, mut submission, mut completion) = ring.split();
 
     if fixed_files {
@@ -379,7 +405,10 @@ fn main() {
 
     let signalfd = signalfd_full(libc::SFD_CLOEXEC).expect("failed to create signalfd");
 
-    let mut main_ring = io_uring::IoUring::new(8).expect("failed to create io_uring instance");
+    let mut main_ring: IoUring<squeue::Entry, cqueue::Entry> = IoUring::builder()
+        .setup_single_issuer()
+        .build(8)
+        .expect("failed to create main io_uring instance");
 
     let mut siginfo: MaybeUninit<libc::signalfd_siginfo> = MaybeUninit::uninit();
 
@@ -424,7 +453,13 @@ fn main() {
         for _ in 0..thread_count.get() {
             threads.push(s.spawn(|| {
                 if args.server {
-                    receive_datagrams(&socket, args.fixed_files, args.fixed_buffers, &stop)
+                    receive_datagrams(
+                        &socket,
+                        args.fixed_files,
+                        args.fixed_buffers,
+                        args.single_issuer,
+                        &stop,
+                    )
                 } else {
                     send_datagrams(
                         &socket,
@@ -432,6 +467,7 @@ fn main() {
                         args.fixed_files,
                         args.fixed_buffers,
                         args.zero_copy,
+                        args.single_issuer,
                         &stop,
                     )
                 }
