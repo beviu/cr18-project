@@ -1,9 +1,11 @@
 use std::{
     ffi::c_void,
-    mem,
+    io,
+    mem::{self, MaybeUninit},
     net::UdpSocket,
     num::NonZeroUsize,
     os::fd::AsRawFd,
+    ptr,
     sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant},
@@ -271,6 +273,24 @@ fn receive_datagrams(socket: &UdpSocket, fixed_files: bool, fixed_buffers: bool)
     datagram_count
 }
 
+fn mask_sigint() -> io::Result<()> {
+    let mut mask: MaybeUninit<libc::sigset_t> = MaybeUninit::uninit();
+
+    unsafe {
+        libc::sigemptyset(mask.as_mut_ptr());
+    }
+    unsafe {
+        libc::sigaddset(mask.as_mut_ptr(), libc::SIGINT);
+    }
+
+    let ret = unsafe { libc::sigprocmask(libc::SIG_BLOCK, mask.as_ptr(), ptr::null_mut()) };
+    if ret == -1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -279,6 +299,8 @@ fn main() {
     let thread_count = args
         .threads
         .unwrap_or_else(|| thread::available_parallelism().unwrap());
+
+    mask_sigint().expect("failed to mask SIGINT");
 
     let datagram_count: u64 = thread::scope(|s| {
         let mut threads = Vec::new();
