@@ -1,15 +1,14 @@
 use std::{
-    ffi::c_void,
+    ffi::{c_uint, c_void},
     fs::File,
     io,
     mem::{self, MaybeUninit},
     net::UdpSocket,
     num::NonZeroUsize,
-    os::fd::{AsRawFd, FromRawFd, OwnedFd},
+    os::fd::{AsRawFd, FromRawFd},
     ptr,
-    sync::atomic::{AtomicU64, AtomicU8, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
     thread,
-    time::{Duration, Instant},
 };
 
 use buf_ring::{BufRing, BufRingMmap};
@@ -50,7 +49,7 @@ fn send_datagrams(
     fixed_files: bool,
     fixed_buffers: bool,
     zero_copy: bool,
-    stop: &AtomicU8,
+    stop: &AtomicU32,
 ) -> u64 {
     let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
@@ -89,6 +88,22 @@ fn send_datagrams(
         }
     }
 
+    {
+        const FUTEX2_SIZE_U32: u32 = 0x2;
+        let wait = io_uring::opcode::FutexWait::new(
+            stop.as_ptr() as *const _,
+            0,
+            libc::FUTEX_BITSET_MATCH_ANY as c_uint as u64,
+            FUTEX2_SIZE_U32,
+        )
+        .build()
+        .user_data(1);
+        unsafe {
+            submission.push(&wait).unwrap();
+        }
+        submission.sync();
+    }
+
     let addr = libc::sockaddr_in {
         sin_family: u16::try_from(libc::AF_INET).unwrap(),
         sin_port: 12000u16.to_be(),
@@ -101,7 +116,7 @@ fn send_datagrams(
     let mut in_flight = 0;
     let mut datagram_count = 0;
 
-    loop {
+    'main_loop: loop {
         let keep_sending = stop.load(Ordering::Relaxed) == 0;
         if keep_sending {
             while !submission.is_full() {
@@ -157,12 +172,18 @@ fn send_datagrams(
             completion.sync();
 
             for entry in &mut completion {
+                if entry.user_data() == 1 {
+                    if entry.result() < 0 {
+                        eprintln!("futex_wait: {}", entry.result());
+                    }
+                    break 'main_loop;
+                }
                 if io_uring::cqueue::notif(entry.flags()) {
                     continue;
                 }
                 if entry.result() < 0 {
                     eprintln!("sendto: {}", entry.result());
-                    return datagram_count;
+                    break 'main_loop;
                 }
                 datagram_count += 1;
                 in_flight -= 1;
@@ -183,7 +204,7 @@ fn receive_datagrams(
     socket: &UdpSocket,
     fixed_files: bool,
     fixed_buffers: bool,
-    stop: &AtomicU8,
+    stop: &AtomicU32,
 ) -> u64 {
     let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
@@ -222,10 +243,26 @@ fn receive_datagrams(
         }
     }
 
+    {
+        const FUTEX2_SIZE_U32: u32 = 0x2;
+        let wait = io_uring::opcode::FutexWait::new(
+            stop.as_ptr() as *const _,
+            0,
+            libc::FUTEX_BITSET_MATCH_ANY as c_uint as u64,
+            FUTEX2_SIZE_U32,
+        )
+        .build()
+        .user_data(1);
+        unsafe {
+            submission.push(&wait).unwrap();
+        }
+        submission.sync();
+    }
+
     let mut in_flight = 0;
     let mut datagram_count = 0;
 
-    loop {
+    'main_loop: loop {
         let keep_receiving = stop.load(Ordering::Relaxed) == 0;
         if keep_receiving {
             while !submission.is_full() {
@@ -255,6 +292,12 @@ fn receive_datagrams(
             completion.sync();
 
             for entry in &mut completion {
+                if entry.user_data() == 1 {
+                    if entry.result() < 0 {
+                        eprintln!("futex_wait: {}", entry.result());
+                    }
+                    break 'main_loop;
+                }
                 if io_uring::cqueue::notif(entry.flags()) {
                     continue;
                 }
@@ -337,7 +380,7 @@ fn main() {
         ring.submitter().submit().expect("failed to submit timeout");
     }
 
-    let stop = AtomicU8::new(0);
+    let stop = AtomicU32::new(0);
 
     let datagram_count: u64 = thread::scope(|s| {
         let mut threads = Vec::new();
