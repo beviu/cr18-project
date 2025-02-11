@@ -362,17 +362,30 @@ fn main() {
 
     let mut ring = io_uring::IoUring::new(8).expect("failed to create io_uring instance");
 
+    let mut siginfo: MaybeUninit<libc::signalfd_siginfo> = MaybeUninit::uninit();
+
     {
         let timespec = Timespec::new().sec(1);
         let timeout = io_uring::opcode::Timeout::new(&timespec)
             .flags(TimeoutFlags::BOOTTIME)
             .build();
 
+        let fd = io_uring::types::Fd(signalfd.as_raw_fd());
+        // TOOD: Will this cause UB due to pointer/reference aliasing rules?
+        let read = io_uring::opcode::Read::new(
+            fd,
+            siginfo.as_mut_ptr() as *mut _,
+            u32::try_from(mem::size_of_val(&siginfo)).unwrap(),
+        )
+        .build();
+
         unsafe {
-            ring.submission().push(&timeout).unwrap();
+            ring.submission().push_multiple(&[timeout, read]).unwrap();
         }
 
-        ring.submitter().submit().expect("failed to submit timeout");
+        ring.submitter()
+            .submit()
+            .expect("failed to submit SQEs on main io_uring instance");
     }
 
     let stop = AtomicU32::new(0);
@@ -396,9 +409,14 @@ fn main() {
             }));
         }
 
-        ring.submitter()
-            .submit_and_wait(1)
-            .expect("failed to wait on main io_uring instance");
+        loop {
+            ring.submitter()
+                .submit_and_wait(1)
+                .expect("failed to wait on main io_uring instance");
+            if ring.completion().next().is_some() {
+                break;
+            }
+        }
 
         stop.store(1, Ordering::Relaxed);
         futex_wake_all(&stop);
