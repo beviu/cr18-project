@@ -97,7 +97,7 @@ impl<'a> BufRing<'a> {
     }
 }
 
-impl<'a> Drop for BufRing<'a> {
+impl Drop for BufRing<'_> {
     fn drop(&mut self) {
         self.submitter
             .unregister_buf_ring(self.bgid)
