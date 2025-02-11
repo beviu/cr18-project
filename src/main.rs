@@ -7,7 +7,7 @@ use std::{
     num::NonZeroUsize,
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
     ptr,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, AtomicU8, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -50,6 +50,7 @@ fn send_datagrams(
     fixed_files: bool,
     fixed_buffers: bool,
     zero_copy: bool,
+    stop: &AtomicU8,
 ) -> u64 {
     let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
@@ -88,8 +89,6 @@ fn send_datagrams(
         }
     }
 
-    let start = Instant::now();
-
     let addr = libc::sockaddr_in {
         sin_family: u16::try_from(libc::AF_INET).unwrap(),
         sin_port: 12000u16.to_be(),
@@ -103,7 +102,7 @@ fn send_datagrams(
     let mut datagram_count = 0;
 
     loop {
-        let keep_sending = start.elapsed() < Duration::from_secs(1);
+        let keep_sending = stop.load(Ordering::Relaxed) == 0;
         if keep_sending {
             while !submission.is_full() {
                 let len = u32::try_from(BUF_SIZE).unwrap();
@@ -180,7 +179,12 @@ fn send_datagrams(
     datagram_count
 }
 
-fn receive_datagrams(socket: &UdpSocket, fixed_files: bool, fixed_buffers: bool) -> u64 {
+fn receive_datagrams(
+    socket: &UdpSocket,
+    fixed_files: bool,
+    fixed_buffers: bool,
+    stop: &AtomicU8,
+) -> u64 {
     let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
 
@@ -218,13 +222,11 @@ fn receive_datagrams(socket: &UdpSocket, fixed_files: bool, fixed_buffers: bool)
         }
     }
 
-    let start = Instant::now();
-
     let mut in_flight = 0;
     let mut datagram_count = 0;
 
     loop {
-        let keep_receiving = start.elapsed() < Duration::from_secs(1);
+        let keep_receiving = stop.load(Ordering::Relaxed) == 0;
         if keep_receiving {
             while !submission.is_full() {
                 let len = u32::try_from(BUF_SIZE).unwrap();
@@ -335,19 +337,22 @@ fn main() {
         ring.submitter().submit().expect("failed to submit timeout");
     }
 
+    let stop = AtomicU8::new(0);
+
     let datagram_count: u64 = thread::scope(|s| {
         let mut threads = Vec::new();
 
         for _ in 0..thread_count.get() {
             threads.push(s.spawn(|| {
                 if args.server {
-                    receive_datagrams(&socket, args.fixed_files, args.fixed_buffers)
+                    receive_datagrams(&socket, args.fixed_files, args.fixed_buffers, &stop)
                 } else {
                     send_datagrams(
                         &socket,
                         args.fixed_files,
                         args.fixed_buffers,
                         args.zero_copy,
+                        &stop,
                     )
                 }
             }));
@@ -356,6 +361,8 @@ fn main() {
         ring.submitter()
             .submit_and_wait(1)
             .expect("failed to wait on main io_uring instance");
+
+        stop.store(1, Ordering::Relaxed);
 
         threads
             .into_iter()
