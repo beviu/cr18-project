@@ -58,6 +58,10 @@ struct Args {
     /// Use io_uring's `IORING_SETUP_SINGLE_ISSUER` option.
     #[clap(long)]
     single_issuer: bool,
+
+    /// Use io_uring's `IORING_SETUP_COOP_TASKRUN` option.
+    #[clap(long)]
+    coop_taskrun: bool,
 }
 
 #[repr(C)]
@@ -73,12 +77,17 @@ fn send_datagrams(
     fixed_buffers: bool,
     zero_copy: bool,
     single_issuer: bool,
+    coop_taskrun: bool,
     stop: &AtomicU32,
 ) -> u64 {
     let mut builder: io_uring::Builder<squeue::Entry, cqueue::Entry> = IoUring::builder();
 
     if single_issuer {
         builder.setup_single_issuer();
+    }
+
+    if coop_taskrun {
+        builder.setup_coop_taskrun();
     }
 
     let mut ring = builder
@@ -239,12 +248,17 @@ fn receive_datagrams(
     fixed_files: bool,
     fixed_buffers: bool,
     single_issuer: bool,
+    coop_taskrun: bool,
     stop: &AtomicU32,
 ) -> u64 {
     let mut builder: io_uring::Builder<squeue::Entry, cqueue::Entry> = IoUring::builder();
 
     if single_issuer {
         builder.setup_single_issuer();
+    }
+
+    if coop_taskrun {
+        builder.setup_coop_taskrun();
     }
 
     let mut ring = builder
@@ -407,6 +421,7 @@ fn main() {
 
     let mut main_ring: IoUring<squeue::Entry, cqueue::Entry> = IoUring::builder()
         .setup_single_issuer()
+        .setup_coop_taskrun()
         .build(8)
         .expect("failed to create main io_uring instance");
 
@@ -458,6 +473,7 @@ fn main() {
                         args.fixed_files,
                         args.fixed_buffers,
                         args.single_issuer,
+                        args.coop_taskrun,
                         &stop,
                     )
                 } else {
@@ -468,6 +484,7 @@ fn main() {
                         args.fixed_buffers,
                         args.zero_copy,
                         args.single_issuer,
+                        args.coop_taskrun,
                         &stop,
                     )
                 }
