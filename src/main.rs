@@ -77,6 +77,9 @@ fn send_datagrams(
         }
     }
 
+    const USER_DATA_SEND: u64 = 0;
+    const USER_DATA_STOP: u64 = 1;
+
     {
         const FUTEX2_SIZE_U32: u32 = 0x2;
         let wait = io_uring::opcode::FutexWait::new(
@@ -86,7 +89,7 @@ fn send_datagrams(
             FUTEX2_SIZE_U32 | libc::FUTEX_PRIVATE_FLAG as u32,
         )
         .build()
-        .user_data(1);
+        .user_data(USER_DATA_STOP);
 
         let mut submission = ring.submission();
         unsafe {
@@ -144,6 +147,7 @@ fn send_datagrams(
                         .dest_addr_len(u32::try_from(mem::size_of_val(&addr)).unwrap())
                         .build()
                 };
+                let entry = entry.user_data(USER_DATA_SEND);
 
                 unsafe {
                     submission.push(&entry).unwrap();
@@ -152,20 +156,25 @@ fn send_datagrams(
         }
 
         for entry in ring.completion() {
-            if entry.user_data() == 1 {
-                if entry.result() < 0 {
-                    eprintln!("futex_wait: {}", entry.result());
+            let user_data = entry.user_data();
+            match user_data {
+                USER_DATA_SEND => {
+                    if !io_uring::cqueue::notif(entry.flags()) {
+                        if entry.result() < 0 {
+                            eprintln!("send: {}", entry.result());
+                        } else {
+                            datagram_count += 1;
+                        }
+                    }
                 }
-                break 'main_loop;
+                USER_DATA_STOP => {
+                    if entry.result() < 0 {
+                        eprintln!("futex_wait: {}", entry.result());
+                        break 'main_loop;
+                    }
+                }
+                _ => panic!("unexpected user data {user_data} in CQE"),
             }
-            if io_uring::cqueue::notif(entry.flags()) {
-                continue;
-            }
-            if entry.result() < 0 {
-                eprintln!("sendto: {}", entry.result());
-                break 'main_loop;
-            }
-            datagram_count += 1;
         }
 
         ring.submitter().submit_and_wait(1).unwrap();
