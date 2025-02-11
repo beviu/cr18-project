@@ -35,6 +35,10 @@ struct Args {
     /// Number of threads to use. By default, the number of logical cores is used.
     #[clap(short, long)]
     threads: Option<NonZeroUsize>,
+
+    /// Run as a server instead of a client.
+    #[clap(short, long)]
+    server: bool,
 }
 
 fn send_datagrams(
@@ -42,7 +46,6 @@ fn send_datagrams(
     fixed_files: bool,
     fixed_buffers: bool,
     zero_copy: bool,
-    buf_ring: bool,
 ) -> u64 {
     let mut ring = io_uring::IoUring::new(8).unwrap();
     let (submitter, mut submission, mut completion) = ring.split();
@@ -173,6 +176,101 @@ fn send_datagrams(
     datagram_count
 }
 
+fn receive_datagrams(socket: &UdpSocket, fixed_files: bool, fixed_buffers: bool) -> u64 {
+    let mut ring = io_uring::IoUring::new(8).unwrap();
+    let (submitter, mut submission, mut completion) = ring.split();
+
+    if fixed_files {
+        submitter.register_files(&[socket.as_raw_fd()]).unwrap();
+    }
+
+    let buf_ring_mmap = BufRingMmap::new(8).unwrap();
+    let mut buf_ring = BufRing::register(&submitter, 0, buf_ring_mmap).unwrap();
+
+    const BUF_SIZE: usize = 16;
+
+    let mut bufs = Vec::new();
+    let mut iovecs = Vec::new();
+
+    for i in 0..buf_ring.entry_count() {
+        let mut buf = Box::new([1u8; BUF_SIZE]);
+
+        bufs.push(buf.as_mut_ptr());
+
+        iovecs.push(libc::iovec {
+            iov_base: buf.as_mut_ptr() as *mut c_void,
+            iov_len: buf.len(),
+        });
+
+        // Note: this leaks the memory.
+        unsafe {
+            buf_ring.add_buffer(Box::into_raw(buf), i);
+        }
+    }
+
+    if fixed_buffers {
+        unsafe {
+            submitter.register_buffers(&iovecs).unwrap();
+        }
+    }
+
+    let start = Instant::now();
+
+    let mut in_flight = 0;
+    let mut datagram_count = 0;
+
+    loop {
+        let keep_receiving = start.elapsed() < Duration::from_secs(1);
+        if keep_receiving {
+            while !submission.is_full() {
+                let len = u32::try_from(BUF_SIZE).unwrap();
+
+                let entry = if fixed_files {
+                    let fixed = io_uring::types::Fixed(0);
+                    io_uring::opcode::Recv::new(fixed, bufs[0], len).build()
+                } else {
+                    let fd = io_uring::types::Fd(socket.as_raw_fd());
+                    io_uring::opcode::Recv::new(fd, bufs[0], len).build()
+                };
+
+                unsafe {
+                    submission.push(&entry).unwrap();
+                }
+
+                in_flight += 1;
+            }
+
+            submission.sync();
+        } else if in_flight == 0 {
+            break;
+        }
+
+        if in_flight > 0 {
+            completion.sync();
+
+            for entry in &mut completion {
+                if io_uring::cqueue::notif(entry.flags()) {
+                    continue;
+                }
+                if entry.result() < 0 {
+                    eprintln!("recv: {}", entry.result());
+                    return datagram_count;
+                }
+                datagram_count += 1;
+                in_flight -= 1;
+            }
+        }
+
+        if in_flight > 0 {
+            submitter.submit_and_wait(1).unwrap();
+        } else {
+            submitter.squeue_wait().unwrap();
+        }
+    }
+
+    datagram_count
+}
+
 fn main() {
     let args = Args::parse();
 
@@ -187,13 +285,16 @@ fn main() {
 
         for _ in 0..thread_count.get() {
             threads.push(s.spawn(|| {
-                send_datagrams(
-                    &socket,
-                    args.fixed_files,
-                    args.fixed_buffers,
-                    args.zero_copy,
-                    args.buf_ring,
-                )
+                if args.server {
+                    receive_datagrams(&socket, args.fixed_files, args.fixed_buffers)
+                } else {
+                    send_datagrams(
+                        &socket,
+                        args.fixed_files,
+                        args.fixed_buffers,
+                        args.zero_copy,
+                    )
+                }
             }));
         }
 
