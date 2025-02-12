@@ -14,7 +14,7 @@ use std::{
 use clap::Parser;
 use io_uring::{
     cqueue, squeue,
-    types::{BufRingEntry, CancelBuilder, TimeoutFlags, Timespec},
+    types::{CancelBuilder, TimeoutFlags, Timespec},
     IoUring,
 };
 use io_uring_buf_ring::IoUringBufRing;
@@ -112,8 +112,8 @@ fn send_datagrams(
         }
     }
 
-    const USER_DATA_SEND: u64 = 0;
-    const USER_DATA_STOP: u64 = 1;
+    const USER_DATA_STOP: u64 = 0;
+    const USER_DATA_SEND: u64 = 1;
 
     {
         const FUTEX2_SIZE_U32: u32 = 0x2;
@@ -275,14 +275,16 @@ fn receive_datagrams(
 
     let mut iovecs = Vec::new();
     let mut bufs = Vec::new();
+    let mut available_buf_indices = Vec::new();
 
-    for i in 0..8 {
+    for buf_index in 0..8 {
         let mut buf = Box::new([1u8; BUF_SIZE]);
         iovecs.push(libc::iovec {
             iov_base: buf.as_mut_ptr() as *mut c_void,
             iov_len: buf.len(),
         });
         bufs.push(buf);
+        available_buf_indices.push(buf_index);
     }
 
     if fixed_buffers {
@@ -290,6 +292,9 @@ fn receive_datagrams(
             ring.submitter().register_buffers(&iovecs).unwrap();
         }
     }
+
+    const USER_DATA_STOP: u64 = 0;
+    const USER_DATA_RECV_FIRST: u64 = 1;
 
     {
         const FUTEX2_SIZE_U32: u32 = 0x2;
@@ -300,7 +305,7 @@ fn receive_datagrams(
             FUTEX2_SIZE_U32 | libc::FUTEX_PRIVATE_FLAG as c_uint,
         )
         .build()
-        .user_data(1);
+        .user_data(USER_DATA_STOP);
 
         let mut submission = ring.submission();
         unsafe {
@@ -311,19 +316,23 @@ fn receive_datagrams(
     let mut datagram_count = 0;
 
     'main_loop: while stop.load(Ordering::Relaxed) == 0 {
-        {
+        if !available_buf_indices.is_empty() {
             let mut submission = ring.submission();
-            while !submission.is_full() {
+            while !submission.is_full() && !available_buf_indices.is_empty() {
+                let buf_index = available_buf_indices.pop().unwrap();
                 let len = u32::try_from(BUF_SIZE).unwrap();
 
-                let entry = if fixed_files {
+                let recv = if fixed_files {
                     let fixed = io_uring::types::Fixed(0);
-                    io_uring::opcode::Recv::new(fixed, bufs[0].as_mut_ptr(), len).build()
+                    io_uring::opcode::Recv::new(fixed, bufs[buf_index].as_mut_ptr(), len)
                 } else {
                     let fd = io_uring::types::Fd(socket.as_raw_fd());
-                    io_uring::opcode::Recv::new(fd, bufs[0].as_mut_ptr(), len).build()
+                    io_uring::opcode::Recv::new(fd, bufs[buf_index].as_mut_ptr(), len)
                 };
 
+                let entry = recv
+                    .build()
+                    .user_data(USER_DATA_RECV_FIRST + u64::try_from(buf_index).unwrap());
                 unsafe {
                     submission.push(&entry).unwrap();
                 }
@@ -331,17 +340,26 @@ fn receive_datagrams(
         }
 
         for entry in ring.completion() {
-            if entry.user_data() == 1 {
-                if entry.result() < 0 {
-                    eprintln!("futex_wait: {}", entry.result());
+            match entry.user_data() {
+                USER_DATA_STOP => {
+                    if entry.result() < 0 {
+                        eprintln!("futex_wait: {}", entry.result());
+                        break 'main_loop;
+                    }
                 }
-                break 'main_loop;
+                user_data => {
+                    if let Some(buf_index) = user_data.checked_sub(USER_DATA_RECV_FIRST) {
+                        if entry.result() < 0 {
+                            eprintln!("recv: {}", entry.result());
+                        } else {
+                            datagram_count += 1;
+                        }
+                        available_buf_indices.push(usize::try_from(buf_index).unwrap());
+                    } else {
+                        panic!("unexpected user data {user_data} in CQE");
+                    }
+                }
             }
-            if entry.result() < 0 {
-                eprintln!("recv: {}", entry.result());
-                break 'main_loop;
-            }
-            datagram_count += 1;
         }
 
         ring.submitter().submit_and_wait(1).unwrap();
