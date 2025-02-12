@@ -13,7 +13,8 @@ use std::{
 
 use clap::Parser;
 use io_uring::{
-    cqueue, squeue,
+    cqueue::{self, buffer_select},
+    squeue,
     types::{CancelBuilder, TimeoutFlags, Timespec},
     IoUring,
 };
@@ -213,7 +214,7 @@ fn send_datagrams(
             let user_data = entry.user_data();
             match user_data {
                 USER_DATA_SEND => {
-                    if !io_uring::cqueue::notif(entry.flags()) {
+                    if !cqueue::notif(entry.flags()) {
                         if entry.result() < 0 {
                             eprintln!("send: {}", entry.result());
                         } else {
@@ -247,6 +248,7 @@ fn receive_datagrams(
     fixed_buffers: bool,
     single_issuer: bool,
     coop_taskrun: bool,
+    use_buf_ring: bool,
     stop: &AtomicU32,
 ) -> u64 {
     let mut builder: io_uring::Builder<squeue::Entry, cqueue::Entry> = IoUring::builder();
@@ -270,6 +272,7 @@ fn receive_datagrams(
     }
 
     let buf_ring = IoUringBufRing::new(&ring, 8, 0, 16).expect("failed to create buf_ring");
+    let mut buf_ring_available_count = 8;
 
     const BUF_SIZE: usize = 16;
 
@@ -319,20 +322,41 @@ fn receive_datagrams(
         if !available_buf_indices.is_empty() {
             let mut submission = ring.submission();
             while !submission.is_full() && !available_buf_indices.is_empty() {
-                let buf_index = available_buf_indices.pop().unwrap();
                 let len = u32::try_from(BUF_SIZE).unwrap();
+                let entry = if use_buf_ring {
+                    if buf_ring_available_count == 0 {
+                        break;
+                    }
+                    buf_ring_available_count -= 1;
 
-                let recv = if fixed_files {
-                    let fixed = io_uring::types::Fixed(0);
-                    io_uring::opcode::Recv::new(fixed, bufs[buf_index].as_mut_ptr(), len)
+                    let recv = if fixed_files {
+                        let fixed = io_uring::types::Fixed(0);
+                        io_uring::opcode::Recv::new(fixed, ptr::null_mut(), len)
+                    } else {
+                        let fd = io_uring::types::Fd(socket.as_raw_fd());
+                        io_uring::opcode::Recv::new(fd, ptr::null_mut(), len)
+                    };
+
+                    recv.buf_group(buf_ring.buffer_group())
+                        .build()
+                        .user_data(USER_DATA_RECV_FIRST)
+                        .flags(squeue::Flags::BUFFER_SELECT)
                 } else {
-                    let fd = io_uring::types::Fd(socket.as_raw_fd());
-                    io_uring::opcode::Recv::new(fd, bufs[buf_index].as_mut_ptr(), len)
-                };
+                    let Some(buf_index) = available_buf_indices.pop() else {
+                        break;
+                    };
 
-                let entry = recv
-                    .build()
-                    .user_data(USER_DATA_RECV_FIRST + u64::try_from(buf_index).unwrap());
+                    let recv = if fixed_files {
+                        let fixed = io_uring::types::Fixed(0);
+                        io_uring::opcode::Recv::new(fixed, bufs[buf_index].as_mut_ptr(), len)
+                    } else {
+                        let fd = io_uring::types::Fd(socket.as_raw_fd());
+                        io_uring::opcode::Recv::new(fd, bufs[buf_index].as_mut_ptr(), len)
+                    };
+
+                    recv.build()
+                        .user_data(USER_DATA_RECV_FIRST + u64::try_from(buf_index).unwrap())
+                };
                 unsafe {
                     submission.push(&entry).unwrap();
                 }
@@ -348,15 +372,31 @@ fn receive_datagrams(
                     }
                 }
                 user_data => {
-                    if let Some(buf_index) = user_data.checked_sub(USER_DATA_RECV_FIRST) {
-                        if entry.result() < 0 {
-                            eprintln!("recv: {}", entry.result());
-                        } else {
-                            datagram_count += 1;
+                    if use_buf_ring {
+                        if user_data != USER_DATA_RECV_FIRST {
+                            panic!("unexpected user data {user_data} in CQE");
                         }
-                        available_buf_indices.push(usize::try_from(buf_index).unwrap());
+                        let buf_id = cqueue::buffer_select(entry.flags())
+                            .expect("missing buffer ID in recv CQE");
+                        match usize::try_from(entry.result()) {
+                            Ok(available_len) => {
+                                datagram_count += 1;
+                                mem::drop(unsafe { buf_ring.get_buf(buf_id, available_len) });
+                                buf_ring_available_count += 1;
+                            }
+                            Err(_) => eprintln!("recv: {}", entry.result()),
+                        }
                     } else {
-                        panic!("unexpected user data {user_data} in CQE");
+                        if let Some(buf_index) = user_data.checked_sub(USER_DATA_RECV_FIRST) {
+                            if entry.result() < 0 {
+                                eprintln!("recv: {}", entry.result());
+                            } else {
+                                datagram_count += 1;
+                            }
+                            available_buf_indices.push(usize::try_from(buf_index).unwrap());
+                        } else {
+                            panic!("unexpected user data {user_data} in CQE");
+                        }
                     }
                 }
             }
@@ -483,6 +523,7 @@ fn main() {
                         args.fixed_buffers,
                         args.single_issuer,
                         args.coop_taskrun,
+                        args.buf_ring,
                         &stop,
                     )
                 } else {
