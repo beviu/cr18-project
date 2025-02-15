@@ -185,7 +185,7 @@ impl ZcrxInterfaceQueue {
         let refill_ring_size = page_size
             + mem::size_of::<io_uring_zcrx_rqe>() * usize::try_from(refill_ring_entries).unwrap();
 
-        let area = Mmap::new_anon(area_size)?;
+        let area = Mmap::new_anon((area_size + page_size - 1) & page_mask)?;
         let area_reg = io_uring_zcrx_area_reg {
             addr: area.as_mut_ptr() as u64,
             len: u64::try_from(area.len()).unwrap(),
