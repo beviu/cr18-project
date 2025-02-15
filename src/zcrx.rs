@@ -52,6 +52,17 @@ struct io_uring_zcrx_ifq_reg {
     __resv: [u64; 4],
 }
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+struct io_uring_region_desc {
+    user_addr: u64,
+    size: u64,
+    flags: u32,
+    id: u32,
+    mmap_offset: u64,
+    __resv: [u64; 4],
+}
+
 #[inline(always)]
 pub(crate) unsafe fn unsync_load(u: *const AtomicU32) -> u32 {
     *u.cast::<u32>()
@@ -66,6 +77,25 @@ struct Inner {
 }
 
 impl Inner {
+    unsafe fn new(ifq_reg: &io_uring_zcrx_ifq_reg) -> Inner {
+        let region_desc = &*(ifq_reg.region_ptr as *const io_uring_region_desc);
+        let region_ptr = region_desc.user_addr as *const u8;
+
+        debug_assert!(ifq_reg.rq_entries.is_power_of_two());
+        let ring_mask = ifq_reg.rq_entries - 1;
+
+        Self {
+            head: region_ptr.offset(ifq_reg.offsets.head as isize).cast(),
+            tail: region_ptr.offset(ifq_reg.offsets.tail as isize).cast(),
+            ring_entries: ifq_reg.rq_entries,
+            ring_mask,
+            rqes: region_ptr
+                .offset(ifq_reg.offsets.rqes as isize)
+                .cast_mut()
+                .cast(),
+        }
+    }
+
     #[inline]
     pub(crate) unsafe fn borrow_shared(&self) -> RefillQueue<'_> {
         RefillQueue {
@@ -132,7 +162,7 @@ impl<'a> RefillQueue<'a> {
     /// Developers must ensure that parameters of the entry are valid and will be valid for the
     /// entire duration of the zero-copy receive operations, otherwise it may cause memory problems.
     #[inline]
-    pub unsafe fn push(&mut self, entry: &io_uring_zcrx_rqe)-> Result<(), PushError> {
+    pub unsafe fn push(&mut self, entry: &io_uring_zcrx_rqe) -> Result<(), PushError> {
         if !self.is_full() {
             self.push_unchecked(entry);
             Ok(())
