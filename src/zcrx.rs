@@ -239,6 +239,18 @@ impl ZcrxInterfaceQueue {
         })
     }
 
+    /// Release the memory used by the zero-copy interface queue registration without unregistering
+    /// it from [`IoUring`].
+    ///
+    /// # Safety
+    ///
+    /// Caller must make sure there is no pending zero-copy receive on the [`IoUring`], or the
+    /// [`IoUring`] is dropped.
+    pub unsafe fn drop(mut self) {
+        ManuallyDrop::drop(&mut self.area);
+        ManuallyDrop::drop(&mut self.region);
+    }
+
     /// Get the refill queue. This is used to recycle buffers that were
     /// used for zero-copy receive operations.
     #[inline]
