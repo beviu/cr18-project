@@ -83,6 +83,10 @@ impl Inner {
 
 struct PushError;
 
+// The code for the refill queue wrapper is pretty much a copy of
+// the code for the `io_uring` crate's submission queue wrapper
+// (https://github.com/tokio-rs/io-uring/blob/7ad4f7fd06798169f3b0527b9ce1e07e4cb027df/src/squeue.rs),
+// where mentions of submission queue entries have been replaced with refill queue entries.
 struct RefillQueue<'a> {
     head: u32,
     tail: u32,
