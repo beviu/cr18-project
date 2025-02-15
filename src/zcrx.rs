@@ -32,7 +32,7 @@ pub struct io_uring_zcrx_rqe {
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
-struct io_uring_zcrx_cqe {
+pub struct io_uring_zcrx_cqe {
     off: u64,
     __pad: u32,
 }
