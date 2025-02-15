@@ -63,6 +63,17 @@ struct io_uring_region_desc {
     __resv: [u64; 4],
 }
 
+#[repr(C)]
+#[allow(non_camel_case_types)]
+struct io_uring_zcrx_area_reg {
+    addr: u64,
+    len: u64,
+    rq_area_token: u64,
+    flags: u32,
+    __resv1: u32,
+    __resv2: [u64; 2],
+}
+
 #[inline(always)]
 pub(crate) unsafe fn unsync_load(u: *const AtomicU32) -> u32 {
     *u.cast::<u32>()
