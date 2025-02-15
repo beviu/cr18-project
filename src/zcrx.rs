@@ -1,4 +1,13 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::{
+    ffi, io,
+    mem::{self, ManuallyDrop},
+    os::fd::{IntoRawFd, RawFd},
+    os::unix::io::AsRawFd,
+    ptr,
+    sync::atomic::{AtomicU32, Ordering},
+};
+
+use io_uring::{cqueue, squeue, IoUring};
 
 const IORING_OP_RECV_ZC: u8 = 58;
 
@@ -63,6 +72,9 @@ struct io_uring_region_desc {
     __resv: [u64; 4],
 }
 
+/// Initialise with user provided memory pointed by user_addr.
+const IORING_MEM_REGION_TYPE_USER: u32 = 1;
+
 #[repr(C)]
 #[allow(non_camel_case_types)]
 struct io_uring_zcrx_area_reg {
@@ -79,6 +91,148 @@ pub(crate) unsafe fn unsync_load(u: *const AtomicU32) -> u32 {
     *u.cast::<u32>()
 }
 
+struct Mmap {
+    addr: *mut ffi::c_void,
+    len: usize,
+}
+
+impl Mmap {
+    fn new_anon(len: usize) -> io::Result<Self> {
+        let addr = unsafe {
+            libc::mmap(
+                ptr::null_mut(),
+                len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_ANONYMOUS | libc::MAP_PRIVATE,
+                -1,
+                0,
+            )
+        };
+        if addr == libc::MAP_FAILED {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self { addr, len })
+    }
+
+    #[inline]
+    fn as_mut_ptr(&self) -> *mut ffi::c_void {
+        self.addr
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl Drop for Mmap {
+    fn drop(&mut self) {
+        unsafe {
+            libc::munmap(self.addr, self.len);
+        }
+    }
+}
+
+unsafe fn io_uring_register(
+    fd: RawFd,
+    opcode: ffi::c_uint,
+    arg: *mut ffi::c_void,
+    nr_args: ffi::c_uint,
+) -> io::Result<ffi::c_int> {
+    let ret = libc::syscall(libc::SYS_io_uring_register, fd, opcode, arg, nr_args) as i32;
+    if ret < 0 {
+        return Err(io::Error::from_raw_os_error(-ret));
+    }
+    Ok(ret)
+}
+
+unsafe fn io_uring_register_zcrx_ifq(
+    fd: RawFd,
+    ifq_reg: &mut io_uring_zcrx_ifq_reg,
+) -> io::Result<()> {
+    io_uring_register(
+        fd,
+        IORING_REGISTER_ZCRX_IFQ,
+        ifq_reg as *mut io_uring_zcrx_ifq_reg as *mut _,
+        1,
+    )?;
+    Ok(())
+}
+
+pub struct ZcrxInterfaceQueue {
+    area: ManuallyDrop<Mmap>,
+    region: ManuallyDrop<Mmap>,
+    rq: Inner,
+}
+
+impl ZcrxInterfaceQueue {
+    pub fn new<S: squeue::EntryMarker>(
+        ring: &IoUring<S, cqueue::Entry32>,
+        if_index: u32,
+        rx_queue_index: u32,
+        refill_ring_entries: u32,
+        area_size: usize,
+    ) -> io::Result<Self> {
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let page_mask = !(page_size - 1);
+        let refill_ring_size = page_size
+            + mem::size_of::<io_uring_zcrx_rqe>() * usize::try_from(refill_ring_entries).unwrap();
+
+        let area = Mmap::new_anon(area_size)?;
+        let area_reg = io_uring_zcrx_area_reg {
+            addr: area.as_mut_ptr() as u64,
+            len: u64::try_from(area.len()).unwrap(),
+            rq_area_token: 0,
+            flags: 0,
+            __resv1: 0,
+            __resv2: [0; 2],
+        };
+
+        let region = Mmap::new_anon((refill_ring_size + page_size - 1) & page_mask)?;
+        let region_desc = io_uring_region_desc {
+            user_addr: region.as_mut_ptr() as u64,
+            size: u64::try_from(region.len()).unwrap(),
+            flags: IORING_MEM_REGION_TYPE_USER,
+            id: 0,
+            mmap_offset: 0,
+            __resv: [0; 4],
+        };
+        let region_ptr = region.as_mut_ptr();
+
+        let mut ifq_reg = io_uring_zcrx_ifq_reg {
+            if_idx: if_index,
+            if_rxq: rx_queue_index,
+            rq_entries: refill_ring_entries,
+            flags: 0,
+            area_ptr: &area_reg as *const _ as u64,
+            region_ptr: &region_desc as *const _ as u64,
+            offsets: io_uring_zcrx_offsets {
+                head: 0,
+                tail: 0,
+                rqes: 0,
+                __resv2: 0,
+                __resv: [0; 2],
+            },
+            __resv: [0; 4],
+        };
+        unsafe { io_uring_register_zcrx_ifq(ring.as_raw_fd(), &mut ifq_reg)? };
+
+        Ok(Self {
+            area: ManuallyDrop::new(area),
+            region: ManuallyDrop::new(region),
+            rq: unsafe {
+                Inner::new(
+                    region_ptr,
+                    ifq_reg.rq_entries,
+                    ifq_reg.offsets.head,
+                    ifq_reg.offsets.tail,
+                    ifq_reg.offsets.rqes,
+                )
+            },
+        })
+    }
+}
+
 struct Inner {
     head: *const AtomicU32,
     tail: *const AtomicU32,
@@ -88,22 +242,22 @@ struct Inner {
 }
 
 impl Inner {
-    unsafe fn new(ifq_reg: &io_uring_zcrx_ifq_reg) -> Inner {
-        let region_desc = &*(ifq_reg.region_ptr as *const io_uring_region_desc);
-        let region_ptr = region_desc.user_addr as *const u8;
-
-        debug_assert!(ifq_reg.rq_entries.is_power_of_two());
-        let ring_mask = ifq_reg.rq_entries - 1;
+    unsafe fn new(
+        region: *mut ffi::c_void,
+        ring_entries: u32,
+        head_offset: u32,
+        tail_offset: u32,
+        rqes_offset: u32,
+    ) -> Inner {
+        debug_assert!(ring_entries.is_power_of_two());
+        let ring_mask = ring_entries - 1;
 
         Self {
-            head: region_ptr.offset(ifq_reg.offsets.head as isize).cast(),
-            tail: region_ptr.offset(ifq_reg.offsets.tail as isize).cast(),
-            ring_entries: ifq_reg.rq_entries,
+            head: region.offset(head_offset as isize).cast(),
+            tail: region.offset(tail_offset as isize).cast(),
+            ring_entries,
             ring_mask,
-            rqes: region_ptr
-                .offset(ifq_reg.offsets.rqes as isize)
-                .cast_mut()
-                .cast(),
+            rqes: region.offset(rqes_offset as isize).cast(),
         }
     }
 
