@@ -17,7 +17,7 @@ const IORING_REGISTER_ZCRX_IFQ: u32 = 32;
 #[repr(C)]
 #[allow(non_camel_case_types)]
 #[derive(Clone)]
-struct io_uring_zcrx_rqe {
+pub struct io_uring_zcrx_rqe {
     off: u64,
     len: u32,
     __pad: u32,
@@ -231,6 +231,23 @@ impl ZcrxInterfaceQueue {
             },
         })
     }
+
+    /// Get the refill queue. This is used to recycle buffers that were
+    /// used for zero-copy receive operations.
+    #[inline]
+    pub fn refill(&mut self) -> RefillQueue<'_> {
+        self.rq.borrow()
+    }
+
+    /// Get the refill queue from a shared reference.
+    ///
+    /// # Safety
+    ///
+    /// No other [`RefillQueue`]s may exist when calling this function.
+    #[inline]
+    pub unsafe fn refill_shared(&self) -> RefillQueue<'_> {
+        self.rq.borrow_shared()
+    }
 }
 
 struct RefillQueueInner {
@@ -276,13 +293,13 @@ impl RefillQueueInner {
     }
 }
 
-struct PushError;
+pub struct PushError;
 
 // The code for the refill queue wrapper is pretty much a copy of
 // the code for the `io_uring` crate's submission queue wrapper
 // (https://github.com/tokio-rs/io-uring/blob/7ad4f7fd06798169f3b0527b9ce1e07e4cb027df/src/squeue.rs),
 // where mentions of submission queue entries have been replaced with refill queue entries.
-struct RefillQueue<'a> {
+pub struct RefillQueue<'a> {
     head: u32,
     tail: u32,
     queue: &'a RefillQueueInner,
