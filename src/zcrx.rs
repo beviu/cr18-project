@@ -408,3 +408,25 @@ impl<'a> Drop for RefillQueue<'a> {
         unsafe { &*self.queue.tail }.store(self.tail, Ordering::Release);
     }
 }
+
+// The io_uring crate does not know know about the IORING_OP_RECV_ZC operation and it has no way
+// to create a SQE with a custom opcode, so redefine the bits of the SQE structure needed for
+// IORING_OP_RECV_ZC operations.
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub(crate) struct io_uring_sqe {
+    pub(crate) opcode: u8,
+    pub(crate) flags: u8,
+    pub(crate) ioprio: u16,
+    pub(crate) fd: i32,
+    pub(crate) off: u64,
+    pub(crate) addr: u64,
+    pub(crate) len: u32,
+    pub(crate) rw_flags: ffi::c_int,
+    pub(crate) user_data: u64,
+    pub(crate) buf_group: u16,
+    pub(crate) personality: u16,
+    pub(crate) file_index: u32,
+    pub(crate) addr3: u64,
+    pub(crate) __pad2: [u64; 1],
+}

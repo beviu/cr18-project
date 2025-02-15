@@ -1,4 +1,10 @@
-use std::{ffi, mem, net::UdpSocket, os::fd::AsRawFd, ptr, sync::atomic::{AtomicU32, Ordering}};
+use std::{
+    ffi, mem,
+    net::UdpSocket,
+    os::fd::AsRawFd,
+    ptr,
+    sync::atomic::{AtomicU32, Ordering},
+};
 
 use io_uring::{cqueue, squeue, types::CancelBuilder, IoUring};
 use io_uring_buf_ring::IoUringBufRing;
