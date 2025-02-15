@@ -162,7 +162,7 @@ unsafe fn io_uring_register_zcrx_ifq(
 pub struct ZcrxInterfaceQueue {
     area: ManuallyDrop<Mmap>,
     region: ManuallyDrop<Mmap>,
-    rq: Inner,
+    rq: RefillQueueInner,
 }
 
 impl ZcrxInterfaceQueue {
@@ -221,7 +221,7 @@ impl ZcrxInterfaceQueue {
             area: ManuallyDrop::new(area),
             region: ManuallyDrop::new(region),
             rq: unsafe {
-                Inner::new(
+                RefillQueueInner::new(
                     region_ptr,
                     ifq_reg.rq_entries,
                     ifq_reg.offsets.head,
@@ -233,7 +233,7 @@ impl ZcrxInterfaceQueue {
     }
 }
 
-struct Inner {
+struct RefillQueueInner {
     head: *const AtomicU32,
     tail: *const AtomicU32,
     ring_entries: u32,
@@ -241,14 +241,14 @@ struct Inner {
     rqes: *mut io_uring_zcrx_rqe,
 }
 
-impl Inner {
+impl RefillQueueInner {
     unsafe fn new(
         region: *mut ffi::c_void,
         ring_entries: u32,
         head_offset: u32,
         tail_offset: u32,
         rqes_offset: u32,
-    ) -> Inner {
+    ) -> RefillQueueInner {
         debug_assert!(ring_entries.is_power_of_two());
         let ring_mask = ring_entries - 1;
 
@@ -285,7 +285,7 @@ struct PushError;
 struct RefillQueue<'a> {
     head: u32,
     tail: u32,
-    queue: &'a Inner,
+    queue: &'a RefillQueueInner,
 }
 
 impl<'a> RefillQueue<'a> {
