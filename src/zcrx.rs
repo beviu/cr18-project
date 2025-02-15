@@ -25,16 +25,16 @@ const IORING_REGISTER_ZCRX_IFQ: u32 = 32;
 #[allow(non_camel_case_types)]
 #[derive(Clone)]
 pub struct io_uring_zcrx_rqe {
-    off: u64,
-    len: u32,
-    __pad: u32,
+    pub off: u64,
+    pub len: u32,
+    pub __pad: u32,
 }
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
 pub struct io_uring_zcrx_cqe {
-    off: u64,
-    __pad: u32,
+    pub off: u64,
+    pub __pad: u32,
 }
 
 /// The bit from which area id is encoded into offsets.
