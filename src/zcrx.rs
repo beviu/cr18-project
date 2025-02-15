@@ -1,7 +1,14 @@
+// This module contains definitions for io_uring zero-copy reception, as well as a
+// Rust wrapper to use it. The raw ABI definitions are ported from this C header file:
+// https://github.com/spikeh/linux/blob/8822e8b5bc7d0a18b83a4df74fafb6efc0bbfc2b/include/uapi/linux/
+// io_uring.h and the Rust wrapper and documentation comments
+// are largely based on the code from the io_uring Rust crate:
+// https://github.com/tokio-rs/io-uring/blob/7ad4f7fd06798169f3b0527b9ce1e07e4cb027df/src/lib.rs.
+
 use std::{
     ffi, io,
     mem::{self, ManuallyDrop},
-    os::fd::{IntoRawFd, RawFd},
+    os::fd::RawFd,
     os::unix::io::AsRawFd,
     ptr,
     sync::atomic::{AtomicU32, Ordering},
