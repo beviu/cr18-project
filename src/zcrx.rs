@@ -147,8 +147,8 @@ unsafe fn io_uring_register(
     nr_args: ffi::c_uint,
 ) -> io::Result<ffi::c_int> {
     let ret = libc::syscall(libc::SYS_io_uring_register, fd, opcode, arg, nr_args) as i32;
-    if ret < 0 {
-        return Err(io::Error::from_raw_os_error(-ret));
+    if ret == -1 {
+        return Err(io::Error::last_os_error());
     }
     Ok(ret)
 }
