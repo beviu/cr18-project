@@ -16,7 +16,7 @@ use std::{
 
 use io_uring::{cqueue, squeue, IoUring};
 
-const IORING_OP_RECV_ZC: u8 = 58;
+pub const IORING_OP_RECV_ZC: u8 = 58;
 
 /// Register a netdev hw rx queue for zerocopy.
 const IORING_REGISTER_ZCRX_IFQ: u32 = 32;
@@ -38,9 +38,9 @@ pub struct io_uring_zcrx_cqe {
 }
 
 /// The bit from which area id is encoded into offsets.
-const IORING_ZCRX_AREA_SHIFT: u64 = 48;
+pub const IORING_ZCRX_AREA_SHIFT: u64 = 48;
 
-const IORING_ZCRX_AREA_MASK: u64 = !((1 << IORING_OP_RECV_ZC) - 1);
+pub const IORING_ZCRX_AREA_MASK: u64 = !((1 << IORING_OP_RECV_ZC) - 1);
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
@@ -430,3 +430,5 @@ pub(crate) struct io_uring_sqe {
     pub(crate) addr3: u64,
     pub(crate) __pad2: [u64; 1],
 }
+
+pub const IORING_RECV_MULTISHOT: u16 = 0x2;

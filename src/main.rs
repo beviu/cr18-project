@@ -17,7 +17,6 @@ use io_uring::{
     types::{CancelBuilder, TimeoutFlags, Timespec},
     IoUring,
 };
-use io_uring_buf_ring::IoUringBufRing;
 
 mod server;
 mod zcrx;
@@ -243,7 +242,6 @@ fn send_datagrams(
 
     datagram_count
 }
-
 
 fn mask_sigint() -> io::Result<()> {
     let mut mask: MaybeUninit<libc::sigset_t> = MaybeUninit::uninit();
