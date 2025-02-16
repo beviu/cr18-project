@@ -1,5 +1,5 @@
 use std::{
-    ffi::{c_uint, c_void},
+    ffi,
     fs::File,
     io,
     mem::{self, MaybeUninit},
@@ -122,7 +122,7 @@ fn send_datagrams(
         let wait = io_uring::opcode::FutexWait::new(
             stop.as_ptr() as *const _,
             0,
-            libc::FUTEX_BITSET_MATCH_ANY as c_uint as u64,
+            libc::FUTEX_BITSET_MATCH_ANY as ffi::c_uint as u64,
             FUTEX2_SIZE_U32 | libc::FUTEX_PRIVATE_FLAG as u32,
         )
         .build()
@@ -344,15 +344,19 @@ fn main() {
         for _ in 0..thread_count.get() {
             threads.push(s.spawn(|| {
                 if args.server {
-                    server::receive_datagrams(
-                        &socket,
-                        args.fixed_files,
-                        args.fixed_buffers,
-                        args.single_issuer,
-                        args.coop_taskrun,
-                        args.buf_ring,
-                        &stop,
-                    )
+                    if args.zero_copy {
+                        server::receive_datagrams_zc(&socket, 0, 0, &stop)
+                    } else {
+                        server::receive_datagrams(
+                            &socket,
+                            args.fixed_files,
+                            args.fixed_buffers,
+                            args.single_issuer,
+                            args.coop_taskrun,
+                            args.buf_ring,
+                            &stop,
+                        )
+                    }
                 } else {
                     send_datagrams(
                         &socket,

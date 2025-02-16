@@ -10,7 +10,10 @@ use std::{
 use io_uring::{cqueue, squeue, types::CancelBuilder, IoUring};
 use io_uring_buf_ring::IoUringBufRing;
 
-use crate::zcrx::{io_uring_sqe, ZcrxInterfaceQueue, IORING_OP_RECV_ZC, IORING_RECV_MULTISHOT};
+use crate::zcrx::{
+    io_uring_sqe, io_uring_zcrx_cqe, io_uring_zcrx_rqe, ZcrxInterfaceQueue, IORING_OP_RECV_ZC,
+    IORING_RECV_MULTISHOT, IORING_ZCRX_AREA_MASK,
+};
 
 pub fn receive_datagrams(
     socket: &UdpSocket,
@@ -202,7 +205,7 @@ pub fn receive_datagrams_zc(
         .register_files(&[socket.as_raw_fd()])
         .unwrap();
 
-    let ifq = ZcrxInterfaceQueue::new(&ring, if_index, rx_queue_index, 32, 8192)
+    let mut ifq = ZcrxInterfaceQueue::new(&ring, if_index, rx_queue_index, 32, 8192)
         .expect("failed to register interface queue for zero-copy receive");
 
     const USER_DATA_STOP: u64 = 0;
@@ -237,8 +240,10 @@ pub fn receive_datagrams_zc(
     };
     let recv: squeue::Entry = unsafe { mem::transmute(recv) };
 
-    unsafe { ring.submission().push_multiple(&[wait, recv]).unwrap(); }
-    
+    unsafe {
+        ring.submission().push_multiple(&[wait, recv]).unwrap();
+    }
+
     let mut datagram_count = 0;
 
     'main_loop: while stop.load(Ordering::Relaxed) == 0 {
@@ -251,7 +256,24 @@ pub fn receive_datagrams_zc(
                     }
                 }
                 USER_DATA_RECV => {
-                    println!("receive!");
+                    // TODO: If more is not set, then start a new multishot operation.
+                    if entry.result() < 0 {
+                        eprintln!("recv_zc: {}", entry.result());
+                        break 'main_loop;
+                    }
+                    if entry.result() != 0 {
+                        let rcqe: &io_uring_zcrx_cqe = unsafe { mem::transmute(entry.big_cqe()) };
+                        let rq_area_token = ifq.rq_area_token();
+                        unsafe {
+                            ifq.refill()
+                                .push(&io_uring_zcrx_rqe {
+                                    off: (rcqe.off & !IORING_ZCRX_AREA_MASK) | rq_area_token,
+                                    len: entry.result() as u32,
+                                    __pad: 0,
+                                })
+                                .unwrap()
+                        };
+                    }
                 }
                 user_data => panic!("unexpected user data {user_data} in CQE"),
             }
@@ -264,7 +286,9 @@ pub fn receive_datagrams_zc(
         .register_sync_cancel(None, CancelBuilder::any())
         .expect("failed to cancel pending requests");
 
-    unsafe { ifq.drop(); }
+    unsafe {
+        ifq.drop();
+    }
 
     datagram_count
 }

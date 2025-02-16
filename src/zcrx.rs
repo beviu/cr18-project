@@ -170,6 +170,7 @@ pub struct ZcrxInterfaceQueue {
     area: ManuallyDrop<Mmap>,
     region: ManuallyDrop<Mmap>,
     rq: RefillQueueInner,
+    rq_area_token: u64,
 }
 
 impl ZcrxInterfaceQueue {
@@ -186,7 +187,7 @@ impl ZcrxInterfaceQueue {
             + mem::size_of::<io_uring_zcrx_rqe>() * usize::try_from(refill_ring_entries).unwrap();
 
         let area = Mmap::new_anon((area_size + page_size - 1) & page_mask)?;
-        let area_reg = io_uring_zcrx_area_reg {
+        let mut area_reg = io_uring_zcrx_area_reg {
             addr: area.as_mut_ptr() as u64,
             len: u64::try_from(area.len()).unwrap(),
             rq_area_token: 0,
@@ -211,7 +212,7 @@ impl ZcrxInterfaceQueue {
             if_rxq: rx_queue_index,
             rq_entries: refill_ring_entries,
             flags: 0,
-            area_ptr: &area_reg as *const _ as u64,
+            area_ptr: &mut area_reg as *mut _ as u64,
             region_ptr: &region_desc as *const _ as u64,
             offsets: io_uring_zcrx_offsets {
                 head: 0,
@@ -236,6 +237,7 @@ impl ZcrxInterfaceQueue {
                     ifq_reg.offsets.rqes,
                 )
             },
+            rq_area_token: area_reg.rq_area_token,
         })
     }
 
@@ -266,6 +268,12 @@ impl ZcrxInterfaceQueue {
     #[inline]
     pub unsafe fn refill_shared(&self) -> RefillQueue<'_> {
         self.rq.borrow_shared()
+    }
+
+    /// Returns the area token to be ORed into the offset in the RQE.
+    #[inline]
+    pub fn rq_area_token(&self) -> u64 {
+        self.rq_area_token
     }
 }
 
@@ -312,6 +320,7 @@ impl RefillQueueInner {
     }
 }
 
+#[derive(Debug)]
 pub struct PushError;
 
 // The code for the refill queue wrapper is pretty much a copy of
