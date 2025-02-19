@@ -67,7 +67,12 @@ fn handle_completion(
 fn main() {
     let args = Args::parse();
 
-    let mut io_uring = IoUring::new(32).expect("failed to create io_uring instance");
+    let mut io_uring = IoUring::builder()
+        .setup_coop_taskrun()
+        .setup_defer_taskrun()
+        .setup_single_issuer()
+        .build(32)
+        .expect("failed to create io_uring instance");
 
     let listener = TcpListener::bind(&args.bind).unwrap();
 

@@ -88,6 +88,9 @@ fn main() {
     }
 
     let mut io_uring = IoUring::builder()
+        .setup_coop_taskrun()
+        .setup_defer_taskrun()
+        .setup_single_issuer()
         .build(32)
         .expect("failed to create io_uring instance");
 
