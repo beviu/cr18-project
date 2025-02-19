@@ -25,13 +25,8 @@
           default = pkgs.mkShell {
             packages = [
               pkgs.cargo
+              pkgs.rustfmt
               pkgs.clippy
-              pkgs.clang-tools
-              pkgs.clang
-              pkgs.meson
-              pkgs.pkg-config
-              pkgs.samurai
-              pkgs.liburing
             ];
           };
         }
