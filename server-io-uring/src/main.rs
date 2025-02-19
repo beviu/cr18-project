@@ -69,13 +69,13 @@ fn main() {
 
     let mut io_uring = IoUring::new(32).expect("failed to create io_uring instance");
 
-    let socket = TcpListener::bind(&args.bind).unwrap();
+    let listener = TcpListener::bind(&args.bind).unwrap();
 
     let submitter = io_uring.submitter();
     // Register a big file table to store server and client sockets.
     submitter.register_files_sparse(128).unwrap();
     submitter
-        .register_files_update(0, &[socket.as_raw_fd()])
+        .register_files_update(0, &[listener.as_raw_fd()])
         .unwrap();
 
     let accept = AcceptMulti::new(Fixed(0)).allocate_file_index(true).build();

@@ -121,14 +121,14 @@ fn handle_event(event: &libc::epoll_event, epoll_fd: BorrowedFd, socket: &TcpLis
 fn main() {
     let args = Args::parse();
 
-    let socket = TcpListener::bind(&args.bind).unwrap();
-    socket.set_nonblocking(true).unwrap();
+    let listener = TcpListener::bind(&args.bind).unwrap();
+    listener.set_nonblocking(true).unwrap();
 
     let epoll_fd = epoll_create1(libc::EPOLL_CLOEXEC).unwrap();
 
     epoll_ctl_add(
         &epoll_fd,
-        &socket,
+        &listener,
         &libc::epoll_event {
             events: libc::EPOLLIN as u32,
             u64: u64::MAX,
@@ -145,7 +145,7 @@ fn main() {
         }
 
         for event in &events {
-            handle_event(&event, epoll_fd.as_fd(), &socket);
+            handle_event(&event, epoll_fd.as_fd(), &listener);
         }
     }
 }
