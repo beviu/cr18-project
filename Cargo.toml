@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.28", features = ["derive"] }
-io-uring = "0.7.4"
-io_uring_buf_ring = "0.2.0"
-libc = "0.2.169"
-memmap2 = "0.9.5"
+io-uring = "0.7"
+io_uring_buf_ring = "0.2"
+
+# io-uring = { git = "https://github.com/beviu/io-uring", branch = "zcrx" }
+# io-uring-zcrx = { git = "https://github.com/beviu/io-uring-zcrx" }
