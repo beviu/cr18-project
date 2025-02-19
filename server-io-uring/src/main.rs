@@ -1,7 +1,13 @@
 use std::{net::TcpListener, os::fd::AsRawFd};
 
 use clap::Parser;
-use io_uring::{cqueue, opcode::{AcceptMulti, FilesUpdate, RecvMulti}, squeue, types::Fixed, IoUring, SubmissionQueue};
+use io_uring::{
+    cqueue,
+    opcode::{AcceptMulti, FilesUpdate, RecvMulti},
+    squeue,
+    types::Fixed,
+    IoUring, SubmissionQueue,
+};
 use io_uring_buf_ring::IoUringBufRing;
 
 #[derive(clap::Parser)]
@@ -10,12 +16,16 @@ struct Args {
     bind: String,
 }
 
-fn handle_completion(cqe: &cqueue::Entry, sq: &mut SubmissionQueue<squeue::Entry>, buf_ring: &mut IoUringBufRing<Vec<u8>>) {
+fn handle_completion(
+    cqe: &cqueue::Entry,
+    sq: &mut SubmissionQueue<squeue::Entry>,
+    buf_ring: &mut IoUringBufRing<Vec<u8>>,
+) {
     if cqe.user_data() == u64::MAX {
         // FILES_UPDATE operation to unregister a client.
         return;
     }
-    
+
     // To make things simpler, the user data in SQEs will represent the file index of the
     // server or client socket.
     let file_index = cqe.user_data() as u32;
@@ -25,8 +35,12 @@ fn handle_completion(cqe: &cqueue::Entry, sq: &mut SubmissionQueue<squeue::Entry
             panic!("accept failed: {ret}");
         }
         let file_index = ret as u32;
-        let recv = RecvMulti::new(Fixed(file_index), 0).build().user_data(file_index.into());
-        unsafe { sq.push(&recv).unwrap(); }
+        let recv = RecvMulti::new(Fixed(file_index), 0)
+            .build()
+            .user_data(file_index.into());
+        unsafe {
+            sq.push(&recv).unwrap();
+        }
     } else {
         let ret = cqe.result();
         if ret < 0 {
@@ -35,8 +49,13 @@ fn handle_completion(cqe: &cqueue::Entry, sq: &mut SubmissionQueue<squeue::Entry
         if ret <= 0 {
             // Unregister the client socket.
             const DELETE: i32 = -1;
-            let unregister = FilesUpdate::new(&DELETE as *const _, 1).offset(file_index as i32).build().user_data(u64::MAX);
-            unsafe { sq.push(&unregister).unwrap(); }
+            let unregister = FilesUpdate::new(&DELETE as *const _, 1)
+                .offset(file_index as i32)
+                .build()
+                .user_data(u64::MAX);
+            unsafe {
+                sq.push(&unregister).unwrap();
+            }
         } else {
             let id = cqueue::buffer_select(cqe.flags()).unwrap();
             let available_len = ret as usize;
@@ -55,10 +74,14 @@ fn main() {
     let submitter = io_uring.submitter();
     // Register a big file table to store server and client sockets.
     submitter.register_files_sparse(128).unwrap();
-    submitter.register_files_update(0, &[socket.as_raw_fd()]).unwrap();
+    submitter
+        .register_files_update(0, &[socket.as_raw_fd()])
+        .unwrap();
 
     let accept = AcceptMulti::new(Fixed(0)).allocate_file_index(true).build();
-    unsafe { io_uring.submission().push(&accept).unwrap(); }
+    unsafe {
+        io_uring.submission().push(&accept).unwrap();
+    }
 
     let mut buf_ring = IoUringBufRing::new(&io_uring, 16, 0, 4096).unwrap();
 
