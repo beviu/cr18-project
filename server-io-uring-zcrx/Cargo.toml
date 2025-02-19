@@ -1,0 +1,10 @@
+[package]
+name = "server-io-uring-zcrx"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+io-uring = { git = "https://github.com/beviu/io-uring", branch = "zcrx" }
+io-uring-zcrx = { git = "https://github.com/beviu/io-uring-zcrx" }
+libc = { version = "0.2", default-features = false }

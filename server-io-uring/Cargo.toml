@@ -1,0 +1,9 @@
+[package]
+name = "server-io-uring"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+io-uring = "0.7"
+io_uring_buf_ring = "0.2"

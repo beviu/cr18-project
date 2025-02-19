@@ -72,9 +72,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "clap"
-version = "4.5.28"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e77c3243bd94243c03672cb5154667347c457ca271254724f9f393aee1c05ff"
+checksum = "92b7b18d71fad5313a1e320fa9897994228ce274b60faa4d694fe0ea89cd9e6d"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -82,9 +82,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.27"
+version = "4.5.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b26884eb4b57140e4d2d93652abfa49498b938b3c9179f9fc487b0acc3edad7"
+checksum = "a35db2071778a7344791a4fb4f95308b5673d219dee3ae348b86642574ecc90c"
 dependencies = [
  "anstream",
  "anstyle",
@@ -117,17 +117,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
 
 [[package]]
-name = "cr18-project"
-version = "0.1.0"
-dependencies = [
- "clap",
- "io-uring",
- "io-uring-zcrx",
- "io_uring_buf_ring",
- "libc",
-]
-
-[[package]]
 name = "errno"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -146,6 +135,17 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "io-uring"
 version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab01638bb6a279897b7691f87f3f3c232451711fd419a69ced980ce61074fa46"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
+name = "io-uring"
+version = "0.7.4"
 source = "git+https://github.com/beviu/io-uring?branch=zcrx#cdb1db096a029aca54faf20a2b147b382206e001"
 dependencies = [
  "bitflags",
@@ -158,7 +158,7 @@ name = "io-uring-zcrx"
 version = "0.1.0"
 source = "git+https://github.com/beviu/io-uring-zcrx#5ddbc8e393319c1425a77c1551ad13105e590ec9"
 dependencies = [
- "io-uring",
+ "io-uring 0.7.4 (git+https://github.com/beviu/io-uring?branch=zcrx)",
  "libc",
 ]
 
@@ -169,7 +169,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92cd3b1fdc9f81ee3d942a4886c94709544d90b67d28f29b7b139a262adec9a7"
 dependencies = [
  "bytes",
- "io-uring",
+ "io-uring 0.7.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustix",
 ]
 
@@ -193,9 +193,9 @@ checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
 
 [[package]]
 name = "once_cell"
-version = "1.20.2"
+version = "1.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
+checksum = "945462a4b81e43c4e3ba96bd7b49d834c6f61198356aa858733bc4acf3cbe62e"
 
 [[package]]
 name = "proc-macro2"
@@ -229,6 +229,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "server-io-uring"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "io-uring 0.7.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "io_uring_buf_ring",
+]
+
+[[package]]
+name = "server-io-uring-zcrx"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "io-uring 0.7.4 (git+https://github.com/beviu/io-uring?branch=zcrx)",
+ "io-uring-zcrx",
+ "libc",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -247,9 +266,9 @@ dependencies = [
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.16"
+version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a210d160f08b701c8721ba1c726c11662f877ea6b7094007e1ca9a1041945034"
+checksum = "00e2473a93778eb0bad35909dff6a10d28e63f792f16ed15e404fca9d5eeedbe"
 
 [[package]]
 name = "utf8parse"

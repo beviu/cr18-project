@@ -1,14 +1,3 @@
-[package]
-name = "cr18-project"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-clap = { version = "4.5.28", features = ["derive"] }
-io-uring = "0.7"
-io_uring_buf_ring = "0.2"
-io-uring-zcrx = { git = "https://github.com/beviu/io-uring-zcrx" }
-libc = { version = "0.2.169", default-features = false }
-
-[patch.crates-io]
-io-uring = { git = "https://github.com/beviu/io-uring", branch = "zcrx" }
+[workspace]
+members = ["server-io-uring", "server-io-uring-zcrx"]
+resolver = "2"
