@@ -226,6 +226,8 @@ void io_uring_prep_send_zc(
 To reduce the overhead of:
 - copying kernel memory to application memory
 
+#pagebreak()
+
 #let column(a, b, rows) = {
   import cetz.draw: *
 
@@ -261,41 +263,46 @@ To reduce the overhead of:
   })
 }
 
-#cetz.canvas({
-  import cetz.draw: *
+#grid(
+  columns: (1fr, 2fr),
+  gutter: 2em,
+  cetz.canvas({
+    import cetz.draw: *
 
-  column((0, 0), (3, 4), (silver, silver, silver, silver, silver, silver))
-  content((1.5, -1), [Area], anchor: "north")
+    column((0, 0), (3, 4), (silver, silver, silver, silver, silver, silver))
+    content((1.5, -1), [Area], anchor: "north")
 
-  ring(
-    (6, 2),
-    0.75,
-    1.25,
-    (
-      blue,
-      blue,
-      blue,
-      silver,
-      silver,
-      silver,
-      silver,
-      silver,
-      silver,
-    ),
-    cursors: (
-      ([head], 0),
-      ([tail], 3),
-    ),
-  )
-  content((6, -1), align(center, [Refill \ buffer]), anchor: "north")
-})
-
-+ The application submits a `RECV_ZC` operation.
-+ The kernel picks a free buffer in the area.
-+ The NIC writes to the buffer.
-+ The kernel enqueues a completion queue entry.
-+ The application processes data in the buffer.
-+ The application enqueues a refill queue entry with the buffer to give ownership back to the kernel.
+    ring(
+      (6, 2),
+      0.75,
+      1.25,
+      (
+        blue,
+        blue,
+        blue,
+        silver,
+        silver,
+        silver,
+        silver,
+        silver,
+        silver,
+      ),
+      cursors: (
+        ([head], 0),
+        ([tail], 3),
+      ),
+    )
+    content((6, -1), align(center, [Refill \ buffer]), anchor: "north")
+  }),
+  [
+    + App submits `RECV_ZC` operation. #pause
+    + Kernel picks free buffer in area. #pause
+    + NIC writes to buffer. #pause
+    + Kernel enqueues completion. #pause
+    + App processes data in buffer. #pause
+    + App enqueues buffer ready to be reused.
+  ],
+)
 
 = Benchmarks
 
