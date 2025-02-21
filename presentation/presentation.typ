@@ -2,13 +2,17 @@
 #import themes.simple: simple-theme, title-slide
 #import "@preview/cetz:0.3.2"
 
+#set document(
+  title: [Benchmarking packet reception with `AF_XDP`, DPDK and io_uring],
+)
+
 #show: simple-theme.with(
   primary: fuchsia,
   author: [Greg Depoire-\-Ferrer],
 )
 
 #title-slide[
-  = Networking performance with io_uring
+  = Benchmarking packet reception with `AF_XDP`, DPDK and io_uring
 ]
 
 = Different APIs
