@@ -263,44 +263,65 @@ To reduce the overhead of:
   })
 }
 
+#let zc-diagram(
+  area-buffer-color: silver,
+  head-position: 0,
+  tail-position: 0,
+) = cetz.canvas({
+  import cetz.draw: *
+
+  column(
+    (0, 0),
+    (3, 4),
+    (silver, silver, area-buffer-color, silver, silver, silver),
+  )
+  content((1.5, -1), [Area], anchor: "north")
+
+  let cursors = if head-position == tail-position {
+    ((align(center, [head, \ tail]), head-position),)
+  } else {
+    (
+      ([head], head-position),
+      ([tail], tail-position),
+    )
+  }
+
+  let parts = (
+    range(head-position).map(_ => silver)
+      + range(head-position, tail-position).map(_ => blue)
+      + range(tail-position, 9).map(_ => silver)
+  )
+
+  ring(
+    (6, 2),
+    0.75,
+    1.25,
+    parts,
+    cursors: cursors,
+  )
+  content((6, -1), align(center, [Refill \ buffer]), anchor: "north")
+})
+
 #grid(
   columns: (1fr, 2fr),
   gutter: 2em,
-  cetz.canvas({
-    import cetz.draw: *
-
-    column((0, 0), (3, 4), (silver, silver, silver, silver, silver, silver))
-    content((1.5, -1), [Area], anchor: "north")
-
-    ring(
-      (6, 2),
-      0.75,
-      1.25,
-      (
-        blue,
-        blue,
-        blue,
-        silver,
-        silver,
-        silver,
-        silver,
-        silver,
-        silver,
-      ),
-      cursors: (
-        ([head], 0),
-        ([tail], 3),
-      ),
-    )
-    content((6, -1), align(center, [Refill \ buffer]), anchor: "north")
-  }),
+  alternatives(
+    zc-diagram(),
+    zc-diagram(area-buffer-color: teal),
+    zc-diagram(area-buffer-color: green),
+    zc-diagram(area-buffer-color: green),
+    zc-diagram(area-buffer-color: green),
+    zc-diagram(area-buffer-color: green, tail-position: 1),
+    zc-diagram(head-position: 1, tail-position: 1),
+  ),
   [
     + App submits `RECV_ZC` operation. #pause
     + Kernel picks free buffer in area. #pause
     + NIC writes to buffer. #pause
     + Kernel enqueues completion. #pause
     + App processes data in buffer. #pause
-    + App enqueues buffer ready to be reused.
+    + App enqueues buffer ready to be reused. #pause
+    + Kernel marks buffer as available.
   ],
 )
 
