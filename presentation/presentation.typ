@@ -1,13 +1,14 @@
 #import "@preview/touying:0.5.5": *
 #import themes.simple: simple-theme, title-slide
+#import "@preview/cetz:0.3.2"
 
 #show: simple-theme.with(
-    primary: fuchsia,
-    author: [Greg Depoire-\-Ferrer],
+  primary: fuchsia,
+  author: [Greg Depoire-\-Ferrer],
 )
 
 #title-slide[
-    = Networking performance with io_uring
+  = Networking performance with io_uring
 ]
 
 = Different APIs
@@ -39,8 +40,12 @@ while True:
 
 == `select` and friends
 
-#columns(2, [
-    #text(13pt, [
+#columns(
+  2,
+  [
+    #text(
+      13pt,
+      [
         ```python
         import socket, select
 
@@ -64,13 +69,15 @@ while True:
                 else:
                     l.remove(r)
         ```
-    ])
+      ],
+    )
 
     - *readiness-based*
     - one system call per operation
     - *non-blocking*
     - variants: `poll`, *`epoll`*, `kqueue`
-])
+  ],
+)
 
 == Readiness-based interface
 
@@ -103,6 +110,61 @@ printf("%d\n", id); // 1234
 = `io_uring`
 
 == Presentation
+
+#let ring(position, inner-radius, outer-radius, parts, cursors: ()) = {
+  import cetz.draw: *
+
+  group({
+    translate(position)
+
+    let thickness = outer-radius - inner-radius
+
+    let part-count = 9
+    let part-length = 360deg / parts.len()
+
+    for (i, paint) in parts.enumerate() {
+      let angle = 90deg - i * part-length
+      arc(
+        (0, 0),
+        delta: part-length,
+        stop: angle,
+        stroke: (thickness: thickness, paint: paint),
+        anchor: "origin",
+        radius: (inner-radius + outer-radius) / 2,
+      )
+    }
+
+    circle((0, 0), radius: inner-radius)
+    circle((0, 0), radius: outer-radius)
+
+    line((0, inner-radius), (0, outer-radius))
+
+    for i in range(parts.len()) {
+      let angle = 90deg - i * part-length
+      let x = calc.cos(angle)
+      let y = calc.sin(angle)
+      line(
+        (x * inner-radius, y * inner-radius),
+        (x * outer-radius, y * outer-radius),
+      )
+    }
+
+    for (body, position) in cursors {
+      let angle = 90deg - position * part-length
+      group({
+        rotate(angle)
+        content(
+          (outer-radius + 0.7, 0),
+          text(12pt, body),
+          name: "tail-label",
+          angle: angle - 90deg,
+          anchor: "south",
+        )
+        line((outer-radius + 0.6, 0), (outer-radius + 0.1, 0), mark: (end: ">"))
+      })
+    }
+  })
+}
 
 #align(center + horizon, image("io_uring.png", height: 1fr))
 
@@ -164,8 +226,76 @@ void io_uring_prep_send_zc(
 To reduce the overhead of:
 - copying kernel memory to application memory
 
-= DPDK
+#let column(a, b, rows) = {
+  import cetz.draw: *
 
+  get-ctx(ctx => {
+    let (ctx, a, b) = cetz.coordinate.resolve(ctx, a, b)
 
+    assert(
+      a.at(2) == b.at(2),
+      message: "Both rectangle points must have the same z value.",
+    )
 
-= Questions
+    let min = (
+      calc.min(a.at(0), b.at(0)),
+      calc.min(a.at(1), b.at(1)),
+      calc.min(a.at(2), b.at(2)),
+    )
+    let max = (
+      calc.max(a.at(0), b.at(0)),
+      calc.max(a.at(1), b.at(1)),
+      calc.max(a.at(2), b.at(2)),
+    )
+
+    let row-height = (max.at(1) - min.at(1)) / rows.len()
+
+    for (i, paint) in rows.enumerate() {
+      let y = min.at(1) + i * row-height
+      rect(
+        (min.at(0), y, min.at(2)),
+        (max.at(0), y + row-height, max.at(2)),
+        fill: paint,
+      )
+    }
+  })
+}
+
+#cetz.canvas({
+  import cetz.draw: *
+
+  column((0, 0), (3, 4), (silver, silver, silver, silver, silver, silver))
+  content((1.5, -1), [Area], anchor: "north")
+
+  ring(
+    (6, 2),
+    0.75,
+    1.25,
+    (
+      blue,
+      blue,
+      blue,
+      silver,
+      silver,
+      silver,
+      silver,
+      silver,
+      silver,
+    ),
+    cursors: (
+      ([head], 0),
+      ([tail], 3),
+    ),
+  )
+  content((6, -1), align(center, [Refill \ buffer]), anchor: "north")
+})
+
++ The application submits a `RECV_ZC` operation.
++ The kernel picks a free buffer in the area.
++ The NIC writes to the buffer.
++ The kernel enqueues a completion queue entry.
++ The application processes data in the buffer.
++ The application enqueues a refill queue entry with the buffer to give ownership back to the kernel.
+
+= Benchmarks
+
