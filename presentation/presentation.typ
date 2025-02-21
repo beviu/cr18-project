@@ -4,6 +4,7 @@
 
 #set document(
   title: [Benchmarking packet reception with `AF_XDP`, DPDK and io_uring],
+  date: datetime(day: 21, month: 2, year: 2025),
 )
 
 #show: simple-theme.with(
@@ -16,6 +17,27 @@
 ]
 
 #outline(depth: 1)
+
+= Ethernet
+
+== DPDK
+
+== `AF_XDP`
+
+== Benchmarks
+
+Vary the number of cores to use and packet size.
+Measure the number of packets per second.
+
+= TCP
+
+== `epoll`
+
+== io_uring
+
+== Benchmarks
+
+Ask Francesco what to benchmark if I have time to do this.
 
 = Different APIs
 
