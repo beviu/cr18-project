@@ -15,6 +15,8 @@
   = Benchmarking packet reception with `AF_XDP`, DPDK and io_uring
 ]
 
+#outline(depth: 1)
+
 = Different APIs
 
 == BSD socket API
