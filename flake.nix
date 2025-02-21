@@ -24,10 +24,24 @@
         {
           default = pkgs.mkShell {
             packages = [
+              pkgs.bpftools
               pkgs.cargo
-              pkgs.rustfmt
+              pkgs.clang-tools
+              pkgs.clang
               pkgs.clippy
+              pkgs.elfutils
+              pkgs.glibc_multi
+              pkgs.libcap
+              pkgs.libmnl
+              pkgs.libpcap
+              pkgs.llvm
+              pkgs.m4
+              pkgs.pkg-config
+              pkgs.rustfmt
             ];
+
+            # Disable zerocallusedregs to fix an error when bulding BPF programs.
+            NIX_HARDENING_ENABLE = "";
           };
         }
       );
