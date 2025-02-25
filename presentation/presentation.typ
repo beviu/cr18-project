@@ -23,17 +23,22 @@
 - Kernel bypass #math.arrow.r no overhead due to transition between kernel space and user space.
 - Networking code is written to be as fast as possible #math.arrow.r faster than Linux networking stack.
 - Need to reserve an entire NIC for the application #math.arrow.r no sharing of resources.
+- Linux NIC drivers cannot be reused.
 
 #align(right, image("DPDK_logo_horizontal.svg", height: 1fr))
 
-== `AF_XDP`
+== Express Data Path (XDP)
+
+- *XDP programs* are BPF programs that are called for every incoming packet just after reception but before allocating memory for a socket buffer.
+- They can drop packets, modify them, and chose to pass them to the networking stack, redirect them to a port or to userspace for further processing.
+- Packets redirected to userspace are received on a `AF_XDP` socket.
+- Need to reserve a NIC queue for the application.
+- Uses Linux NIC drivers.
 
 == Benchmarks
 
 Vary the number of cores to use and packet size.
 Measure the number of packets per second.
-
-
 
 = TCP
 
