@@ -20,6 +20,12 @@
 
 == DPDK
 
+- Kernel bypass #math.arrow.r no overhead due to transition between kernel space and user space.
+- Networking code is written to be as fast as possible #math.arrow.r faster than Linux networking stack.
+- Need to reserve an entire NIC for the application #math.arrow.r no sharing of resources.
+
+#align(right, image("DPDK_logo_horizontal.svg", height: 1fr))
+
 == `AF_XDP`
 
 == Benchmarks
