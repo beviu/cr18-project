@@ -20,6 +20,8 @@
 
 == DPDK
 
+=== Description
+
 - Kernel bypass #math.arrow.r no overhead due to transition between kernel space and user space.
 - Networking code is written to be as fast as possible #math.arrow.r faster than Linux networking stack.
 - Need to reserve an entire NIC for the application #math.arrow.r no sharing of resources.
@@ -28,6 +30,8 @@
 #align(right, image("DPDK_logo_horizontal.svg", height: 1fr))
 
 == Express Data Path (XDP)
+
+=== Description
 
 - *XDP programs* are BPF programs that are called for every incoming packet just after reception but before allocating memory for a socket buffer.
 - They can drop packets, modify them, and chose to pass them to the networking stack, redirect them to a port or to userspace for further processing.
