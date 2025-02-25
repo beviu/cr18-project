@@ -18,6 +18,12 @@
 
 = Ethernet
 
+== Experiment
+
+- _Sender_ machine sends packets as fast as possible to _receiver_ machine using `pktgen` (Linux kernel module).
+- Measure the number of packets received per second.
+- Vary the number of *cores* and *packet size*.
+
 == DPDK
 
 === Description
@@ -370,3 +376,13 @@ To reduce the overhead of:
 
 = Benchmarks
 
+#appendix[
+  == `pktgen` invocation
+
+  ```console
+  $ sudo modprobe pktgen
+  $ git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+  $ cd samples/pktgen
+  $ sudo ./pktgen_sample01_simple.sh -i <interface> -s <packet_size> -m <mac_address>
+  ```
+]
