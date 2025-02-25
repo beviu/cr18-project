@@ -7,9 +7,10 @@
 I used the `pktgen` kernel module to generate packets.
 
 ```console
+$ sudo modprobe pktgen
 $ git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 $ cd samples/pktgen
-$ ./pktgen_sample01_simple.sh -i <interface> -s <packet_size> -m <mac_address>
+$ sudo ./pktgen_sample01_simple.sh -i <interface> -s <packet_size> -m <mac_address>
 ```
 
 ### DPDK

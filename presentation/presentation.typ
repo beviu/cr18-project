@@ -16,8 +16,6 @@
   = Benchmarking packet reception with `AF_XDP`, DPDK and io_uring
 ]
 
-#outline(depth: 1)
-
 = Ethernet
 
 == DPDK
@@ -28,6 +26,8 @@
 
 Vary the number of cores to use and packet size.
 Measure the number of packets per second.
+
+
 
 = TCP
 

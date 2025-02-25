@@ -36,7 +36,9 @@
               pkgs.libpcap
               pkgs.llvm
               pkgs.m4
+              pkgs.pciutils
               pkgs.pkg-config
+              pkgs.pktgen
               pkgs.rustfmt
             ];
 
