@@ -1,20 +1,47 @@
-#import "@preview/touying:0.5.5": *
+#import "@preview/touying:0.6.0": *
 #import themes.simple: simple-theme, title-slide
 #import "@preview/cetz:0.3.2"
-
-#set document(
-  title: [Benchmarking packet reception with `AF_XDP`, DPDK and io_uring],
-  date: datetime(day: 21, month: 2, year: 2025),
-)
 
 #show: simple-theme.with(
   primary: fuchsia,
   author: [Greg Depoire-\-Ferrer],
+  config-info(
+    title: [Benchmarking packet reception with `AF_XDP`, DPDK and `io_uring`],
+    author: [Greg Depoire-\-Ferrer],
+    date: datetime(day: 3, month: 3, year: 2025),
+    institution: [ENS de Lyon],
+  ),
 )
 
+#let todo(body) = text(red, [TODO #body])
+
 #title-slide[
-  = Benchmarking packet reception with `AF_XDP`, DPDK and io_uring
+  = Benchmarking packet reception with `AF_XDP`, DPDK and `io_uring`
+
+  #v(1em)
+
+  Greg Depoire-\-Ferrer
 ]
+
+= Motivation
+
+== Motivation
+
+=== Using various networking stacks
+
+// Touying has a bug
+// (https://forum.typst.app/t/how-do-i-add-bibliography-to-a-touying-presentation/643/7) which makes
+// this code snippet create a blank slide if it's put in the preamble, so put it later.
+#show: magic.bibliography-as-footnote.with(
+  bibliography("bibliography.yaml", title: none),
+)
+
+- A need for processing packets on *commodity hardware* with *low overhead*.@retina #todo[Add more references.]
+- *Portability* and integration with the operating system versus *performance*.
+
+=== `io_uring`
+
+Keeps evolving #math.arrow.r need for new benchmarks.
 
 = Ethernet
 

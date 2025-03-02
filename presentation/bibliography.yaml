@@ -1,0 +1,24 @@
+retina:
+  type: article
+  title: 'Retina: analyzing 100GbE traffic on commodity hardware'
+  author:
+  - Wan, Gerry
+  - Gong, Fengchen
+  - Barbette, Tom
+  - Durumeric, Zakir
+  date: 2022
+  page-range: 530–544
+  url: https://doi.org/10.1145/3544216.3544227
+  serial-number:
+    doi: 10.1145/3544216.3544227
+    isbn: '9781450394208'
+  abstract: As network speeds have increased to over 100 Gbps, operators and researchers have lost the ability to easily ask complex questions of reassembled and parsed network traffic. In this paper, we introduce Retina, a software framework that lets users analyze over 100 Gbps of real-world traffic on a single server with no specialized hardware. Retina supports running arbitrary user-defined analysis functions on a wide variety of extensible data representations ranging from raw packets to parsed application-layer handshakes. We introduce a novel filtering mechanism and subscription interface to safely and efficiently process high-speed traffic. Under the hood, Retina implements an efficient data pipeline that strategically discards unneeded traffic and defers expensive processing operations to preserve computation for complex analyses. We present the framework architecture, evaluate its performance on production traffic, and explore several applications. Our experiments show that Retina is capable of running sophisticated analyses at over 100 Gbps on a single commodity server and can support 5–100\\texttimes\{\} higher traffic rates than existing solutions, dramatically reducing the effort to complete investigations on real-world networks.
+  parent:
+    type: proceedings
+    title: Proceedings of the ACM SIGCOMM 2022 Conference
+    publisher: Association for Computing Machinery
+    location: Amsterdam, Netherlands
+    parent:
+      type: proceedings
+      title: SIGCOMM '22
+
