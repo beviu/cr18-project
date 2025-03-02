@@ -25,9 +25,9 @@
 
 = Motivation
 
-== Motivation
+== The performance of networking stacks
 
-=== Using various networking stacks
+=== Why use a different networking stack?
 
 // Touying has a bug
 // (https://forum.typst.app/t/how-do-i-add-bibliography-to-a-touying-presentation/643/7) which makes
@@ -42,6 +42,20 @@
 === `io_uring`
 
 Keeps evolving #math.arrow.r need for new benchmarks.
+
+== Comparisons between networking stacks
+
+Networking stacks support different layers.
+
+=== Ethernet
+
+- `AF_XDP`
+- DPDK
+
+=== TCP
+
+- `epoll`
+- `io_uring`
 
 = Ethernet
 
