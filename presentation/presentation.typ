@@ -65,6 +65,26 @@ Networking stacks support different layers.
 - Measure the number of packets received per second.
 - Vary the number of *cores* and *packet size*.
 
+#align(
+  center + horizon,
+  cetz.canvas({
+    import cetz.draw: *
+
+    content((), frame: "rect", padding: .5em, [Sender], name: "sender")
+    content(
+      (rel: (5, 0), to: "sender.east"),
+      frame: "rect",
+      padding: .5em,
+      [Receiver],
+      anchor: "west",
+      name: "receiver",
+    )
+
+    line("sender", "receiver", mark: (end: ">"), name: "arrow")
+    content((rel: (0, -.5em), to: "arrow"), [Frames], anchor: "north")
+  }),
+)
+
 == DPDK
 
 === Description
