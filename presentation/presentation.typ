@@ -1,6 +1,7 @@
 #import "@preview/touying:0.6.0": *
 #import themes.simple: simple-theme, title-slide
 #import "@preview/cetz:0.3.2"
+#import "@preview/cetz-plot:0.1.1"
 
 #show: simple-theme.with(
   primary: fuchsia,
@@ -12,6 +13,8 @@
     institution: [ENS de Lyon],
   ),
 )
+
+#show link: set text(fill: fuchsia)
 
 #let todo(body) = text(red, [TODO #body])
 
@@ -437,6 +440,32 @@ Networking stacks support different layers.
       + App enqueues buffer ready to be reused. #pause
       + Kernel marks buffer as available.
     ],
+  )
+
+  == VM setup
+
+  I prepared the commands to run on the Grid5000 hosts beforehand and tested them on virtual
+  machines first to make sure I was ready and to reduce my usage of Grid5000 resources.
+
+  I installed #link("https://archlinux.org/")[Arch Linux] on two VMs.
+
+  #align(
+    center + horizon,
+    cetz.canvas({
+      import cetz.draw: *
+
+      content((), frame: "rect", padding: .5em, [Sender], name: "sender")
+      content(
+        (rel: (5, 0), to: "sender.east"),
+        frame: "rect",
+        padding: .5em,
+        [Receiver],
+        anchor: "west",
+        name: "receiver",
+      )
+
+      line("sender", "receiver", mark: (symbol: ">"), name: "arrow")
+    }),
   )
 
   = Benchmarks
