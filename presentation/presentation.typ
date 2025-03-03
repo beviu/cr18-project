@@ -447,7 +447,8 @@ Networking stacks support different layers.
   I prepared the commands to run on the Grid5000 hosts beforehand and tested them on virtual
   machines first to make sure I was ready and to reduce my usage of Grid5000 resources.
 
-  I installed #link("https://archlinux.org/")[Arch Linux] on two VMs.
+  I installed #link("https://archlinux.org/")[Arch Linux] on two VMs and configured a bridge with a
+  tap device for each VM in the host.
 
   #align(
     center + horizon,
@@ -467,6 +468,45 @@ Networking stacks support different layers.
       line("sender", "receiver", mark: (symbol: ">"), name: "arrow")
     }),
   )
+
+  #pagebreak()
+
+  Configure the interfaces on the host:
+
+  ```console
+  $ ip tuntap add mode tap tap0
+  $ ip tuntap add mode tap tap1
+  $ ip link add name br0 type bridge
+  $ ip link set dev br0 up
+  $ ip link set tap0 up
+  $ ip link set tap1 up
+  $ ip link set tap0 master br0
+  $ ip link set tap1 master br0
+  $ ip addr add 10.0.0.1/24 dev br0
+  ```
+
+  Configure a NAT to give the VMs access to the Internet:
+
+  ```console
+  $ sysctl net.ipv4.ip_forward=1
+  $ nft add table nat
+  $ nft 'add chain nat postrouting { type nat hook postrouting priority 100 ; }'
+  $ nft add rule nat postrouting masquerade
+  ```
+
+  #pagebreak()
+
+  On the sender VM:
+
+  ```console
+  $ ip addr add 10.0.0.2/24 dev enp0s2
+  ```
+
+  On the receiver VM:
+
+  ```console
+  $ ip addr add 10.0.0.3/24 dev enp0s2
+  ```
 
   = Benchmarks
 
