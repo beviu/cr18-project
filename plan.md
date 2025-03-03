@@ -1,0 +1,7 @@
+- [ ] Finish the presentation except for some blanks to fill in later with the results in the hardware.
+  - [ ] Go over the slides as if I was doing the presentation and modify them so that it would make for a good presentation.
+  - [ ] Take 30 minutes to polish the presentation.
+- [ ] Run the tests on my VM.
+- [ ] Submit the form to get a Grid5000 account.
+- [ ] Once I get my account, run the tests on Grid5000 and modify the slides.
+- [ ] Send the presentation and the repository.
