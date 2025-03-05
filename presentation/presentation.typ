@@ -83,8 +83,8 @@ Networking stacks support different layers.
 
 == Experiment
 
-- _Sender_ machine sends packets as fast as possible to _receiver_ machine using `pktgen` (Linux kernel module).
-- Measure the number of packets received per second.
+- _Sender_ machine sends packets as fast as possible to _receiver_ machine using Pktgen-DPDK.
+- Measure the maximum number of packets received per second.
 - Vary the number of *cores* and *packet size*.
 
 #align(
@@ -109,7 +109,43 @@ Networking stacks support different layers.
 
 == Results
 
+#align(
+  center + horizon,
+  cetz.canvas({
+    import cetz.draw: *
+    import cetz-plot: chart
+
+    let data = (
+      ([64], 2.396386, .337939),
+      ([128], 2.312816, .325026),
+      ([256], 2.287169, .327398),
+      ([512], 2.247936, .399457),
+      ([768], 1.585184, .370436),
+      ([1024], 1.136224, .296402),
+      ([1280], .962752, .239992),
+      ([1518], .814688, .203063),
+    )
+
+    chart.barchart(
+      mode: "clustered",
+      size: (16, auto),
+      label-key: 0,
+      value-key: (1, 2),
+      data,
+      labels: ([VM (DPDK)], [VM (`AF_XDP`)]),
+      x-label: [Maximum Mpps received],
+      y-label: [Packet size (bytes)],
+    )
+  }),
+)
+
 == Conclusions
+
+- `AF_XDP` performs poorly compared to DPDK and has more variability.
+- Packet size is less important with `AF_XDP` than DPDK #math.arrow.r the overhead is not in memory copying.
+- It's possible that I made a mistake in the setup.
+- I was not able to test on bare-metal, but I think these results can still be useful for cloud
+  providers that run everything in VMs.
 
 = TCP
 
@@ -475,14 +511,19 @@ https://github.com/beviu/io-uring/compare/master...zcrx.
 
 == Results
 
+#align(center + horizon)[
+  Unfortunately, I was not able to run the benchmarks.
+]
+
 #appendix[
   = Appendix
 
-  == Virtual machine setup
+  == Virtual machine setup <vm-setup>
 
   I prepared the benchmark setup beforehand, and tested it in virtual
   machines on my PC first to make sure I was ready before testing on actual
-  #link("https://www.grid5000.fr/w/Grid5000:Home")[Grid5000] hardware.
+  #link("https://www.grid5000.fr/w/Grid5000:Home")[Grid5000] hardware. Unfortunately, in the end, I
+  was not able to test on Grid5000.
 
   I installed #link("https://archlinux.org/")[Arch Linux] in two VMs and configured a bridge with a
   tap device for each VM in the host. I used `virtio-net` NICs.
@@ -577,13 +618,28 @@ https://github.com/beviu/io-uring/compare/master...zcrx.
       -cpu host -smp 4 -m 2G \
       -device intel-iommu,intremap=on,caching-mode=on \
       -vga none \
-      -serial stdio \
+      -serial mon:stdio \
       -monitor none \
       -nographic \
-      -netdev tap,id=tap,ifname=tap0,script=no,downscript=no \
-      -device virtio-net-pci,netdev=tap,mac=52:54:00:f8:e2:e3
+      -netdev tap,id=tap,ifname=tap0,vhost=on,script=no,downscript=no \
+      -device virtio-net-pci,mq=on,vectors=2,netdev=tap,mac=52:54:00:f8:e2:e3
     ```,
   )
+
+  === Kernel configuration
+
+  I followed the instructions from the
+  #link("https://doc.dpdk.org/guides/nics/virtio.html#prerequisites-for-rx-interrupts")[DPDK
+documentation].
+
+  I compiled the kernel at commit `76544811c850a1f4c055aa182b513b7a843868ea` with a
+  #link("https://github.com/beviu/cr18-project/tree/main/kernel-config")[custom configuration] and
+  added `console=ttyS0,11520 intel_iommu=on vfio.enable_unsafe_noiommu_mode=1` options to the command
+  line.
+
+  The first option is for using the terminal QEMU is running on as the Linux console.
+
+  #pagebreak()
 
   === Guest network interfaces setup
 
@@ -629,7 +685,6 @@ https://github.com/beviu/io-uring/compare/master...zcrx.
   Make sure to replace the PCI slot with your NIC's.
 
   ```sh
-  sudo modprobe vfio-pci
   sudo dpdk-devbind.py --bind vfio-pci 0000:00:02.0 --force
   sudo sh -c 'echo 512 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages'
   sudo pktgen -l 0,1 -n 1 -a 0000:00:02.0 -- -P -T -m 1.0
@@ -647,9 +702,15 @@ https://github.com/beviu/io-uring/compare/master...zcrx.
   make
   ```
 
+  #pagebreak()
+
   Run the _rxdrop_ example:
 
   ```sh
-  sudo taskset -c 0 ./xdpsock -i enp0s2 -q 0 -r
+  sudo taskset -c 0 ./xdpsock \
+    --interface enp0s2 \
+    --busy-poll \
+    --shared-umem \
+    --rxdrop
   ```
 ]
